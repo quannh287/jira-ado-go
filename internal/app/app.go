@@ -321,6 +321,9 @@ func (a *App) startRun(id int, opts syncjob.RunOptions) {
 	})
 }
 
+// Running is the number of runs in flight, asked before quitting.
+func (a *App) Running() int { return len(a.running) }
+
 // effectiveJob adds the shared user mapping after the job's own, so a job-specific entry wins.
 func (a *App) effectiveJob(j syncjob.Job) syncjob.Job {
 	j.Filters.Users = append(slices.Clone(j.Filters.Users), a.store.SharedUsers()...)

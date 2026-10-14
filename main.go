@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"errors"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
@@ -86,7 +87,20 @@ func main() {
 	mygo.App.OnDidBecomeActive(mygo.ClearNotifications)
 	// Closing the window only hides it, so running syncs go on; Cmd+Q still quits.
 	var quitting bool
-	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { quitting = true })
+	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
+		if n := a.Running(); n > 0 {
+			res, err := mygo.Dialog.Message(mygo.MessageOptions{
+				Parent: win, Type: mygo.MessageWarning, Buttons: []string{"Quit", "Cancel"},
+				Message: fmt.Sprintf("%d sync(s) still running. Quit anyway?", n),
+				Detail:  "They stop at the current issue; the next sync resumes from the last checkpoint.",
+			})
+			if err == nil && res.Button != 0 {
+				e.PreventDefault()
+				return
+			}
+		}
+		quitting = true
+	})
 	mygo.App.OnSecondInstance(func([]string, string) {
 		if win != nil {
 			win.Show()
