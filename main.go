@@ -135,6 +135,7 @@ func main() {
 		appicon.SetIcon = mygo.App.Dock.SetIcon
 		appicon.Apply(store.Settings[appicon.SettingKey])
 		a.Post = win.Update
+		a.Badge = mygo.App.SetBadgeCount
 		// Scheduler jobs: overdue ones start now, the rest when their interval passes.
 		win.Update(a.Tick)
 		go func() {

@@ -85,14 +85,16 @@ func TestSchedulerTick(t *testing.T) {
 	a.now = func() time.Time { return clock }
 	eng := &recordingEngine{}
 	a.engine = eng
+	badge := -1
+	a.Badge = func(n int) { badge = n }
 	f := syncjob.DefaultFilters()
 	f.EveryMinutes = 15
 	id := a.store.AddJob(syncjob.Job{Name: "S", JiraKey: "S", Type: syncjob.Scheduler, Filters: f})
 	a.store.AddJob(syncjob.Job{Name: "M", JiraKey: "M", Filters: f}) // Manual: never scheduled
 
 	a.Tick()
-	if len(eng.jobs) != 0 {
-		t.Fatalf("signed out: runs %d", len(eng.jobs))
+	if len(eng.jobs) != 0 || badge != 0 {
+		t.Fatalf("signed out: runs %d badge %d", len(eng.jobs), badge)
 	}
 	a.pat = "pat"
 	a.store.Jobs[0].Created = clock.Add(-10 * time.Minute)
@@ -102,8 +104,8 @@ func TestSchedulerTick(t *testing.T) {
 	}
 	clock = clock.Add(5 * time.Minute)
 	a.Tick()
-	if len(eng.jobs) != 1 || eng.jobs[0].ID != id {
-		t.Fatalf("runs %d", len(eng.jobs))
+	if len(eng.jobs) != 1 || eng.jobs[0].ID != id || badge != 1 {
+		t.Fatalf("runs %d badge %d", len(eng.jobs), badge) // the run had a failed ticket
 	}
 	a.store.Runs[0].Started = clock
 	clock = clock.Add(14 * time.Minute)

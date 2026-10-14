@@ -54,6 +54,8 @@ type App struct {
 	LogPath string
 	// Notifier, if set, tells the user when a run finishes.
 	Notifier Notifier
+	// Badge, if set, shows the number of jobs whose last run didn't fully succeed (Dock badge).
+	Badge func(n int)
 
 	engine  syncjob.Engine
 	store   *syncjob.Store
@@ -318,6 +320,7 @@ func (a *App) startRun(id int, opts syncjob.RunOptions) {
 		}
 		a.store.Log(id, label+" "+summary)
 		a.notice = job.Name + ": " + summary
+		a.updateBadge()
 	})
 }
 
@@ -326,6 +329,7 @@ func (a *App) Running() int { return len(a.running) }
 
 // Tick starts every active Scheduler job whose interval has passed since its last run (or its creation); main calls it each minute.
 func (a *App) Tick() {
+	a.updateBadge()
 	if a.pat == "" {
 		return // signed out: every run would fail on the missing PAT
 	}
@@ -346,6 +350,19 @@ func (a *App) Tick() {
 	for _, id := range due {
 		a.syncNow(id)
 	}
+}
+
+func (a *App) updateBadge() {
+	if a.Badge == nil {
+		return
+	}
+	n := 0
+	for _, j := range a.store.Jobs {
+		if r, ok := a.store.LastRun(j.ID); ok && r.Status() != syncjob.Success {
+			n++
+		}
+	}
+	a.Badge(n)
 }
 
 // effectiveJob adds the shared user mapping after the job's own, so a job-specific entry wins.
