@@ -39,6 +39,24 @@ func (a *App) settingsPage(c *ui.Context) {
 						ui.Field(c, "App icon", func() { a.appIconPicker(c) }).
 							Description("The Dock icon while the app runs; Finder keeps the packaged icon.")
 					})
+					ui.Fieldset(c, "Notifications", func() {
+						mode := max(slices.Index(notifyModes, a.notifyMode()), 0)
+						ui.Field(c, "When a run ends", func() {
+							ui.Segmented(c.Key("notify"), &mode, "Every run", "Failures only", "Off").Label("Notify").
+								OnChange(func() { a.store.SetSetting(setNotify, notifyModes[mode]) })
+						}).Description("A desktop notification with the counts; click it to open the run's report.")
+						ui.Field(c, "Test", func() {
+							ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+								supported := a.Notifier != nil && a.Notifier.Supported()
+								ui.Button(c.Key("testnotify"), "Send Test Notification").Disabled(!supported).OnClick(func() {
+									a.Notifier.Notify(testNotificationID, "jira-ado", "Notifications work", "Click to come back to Settings. Run notifications open their report.")
+								})
+								if !supported {
+									ui.Text(c, "Needs the packaged app (DMG or go tool mygo dev)").FontSize(12).TextColor(t.TextMuted)
+								}
+							})
+						}).Description("macOS asks for permission the first time; change it later in System Settings → Notifications.")
+					})
 					ui.Fieldset(c, "Azure DevOps", func() {
 						kv(c, "Organization", a.store.Settings[setADOOrg])
 						kv(c, "Signed in as", a.store.Settings[setADOUser])

@@ -2,11 +2,13 @@ package main
 
 import (
 	"cmp"
+	"errors"
 	"log"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"time"
 	_ "time/tzdata" // the Jira account zone for JQL dates; Windows has no zoneinfo of its own
 
@@ -61,9 +63,26 @@ func main() {
 	}
 	a := app.New(engine, store, keys, time.Now)
 	a.LogPath = logPath
+	a.Notifier = &desktopNotifier{}
+
+	// Registered before Run, so the click that relaunched the app is received too; the window may not exist yet.
+	var win *mygo.Window
+	var pending string
+	mygo.App.OnNotificationClick(func(id string) {
+		slog.Info("notification clicked", "id", id, "window", win != nil)
+		if win == nil {
+			pending = id
+			return
+		}
+		win.Show()
+		win.Focus()
+		a.Post(func() { slog.Info("notification opened", "id", id, "page", a.OpenNotification(id)) })
+	})
+	// What the user sees in the app needn't wait in Notification Center.
+	mygo.App.OnDidBecomeActive(mygo.ClearNotifications)
 
 	mygo.App.WhenReady(func() {
-		win := mygo.NewWindow(mygo.WindowOptions{
+		win = mygo.NewWindow(mygo.WindowOptions{
 			Title:           "jira-ado",
 			Width:           1180,
 			Height:          760,
@@ -78,6 +97,9 @@ func main() {
 		appicon.SetIcon = mygo.App.Dock.SetIcon
 		appicon.Apply(store.Settings[appicon.SettingKey])
 		a.Post = win.Update
+		if pending != "" {
+			slog.Info("notification opened at launch", "id", pending, "page", a.OpenNotification(pending))
+		}
 		a.Async = func(work, done func()) {
 			go func() {
 				// A panic in background work is logged with its stack; done still runs so the UI leaves its busy state.
@@ -100,4 +122,28 @@ func main() {
 func fatal(what string, err error) {
 	slog.Error("fatal", "what", what, "err", err)
 	os.Exit(1)
+}
+
+// desktopNotifier shows notifications through MyGo; Show may wait for the user's first permission answer, so it runs off the UI thread.
+type desktopNotifier struct{ denied atomic.Bool }
+
+func (n *desktopNotifier) Supported() bool { return mygo.NotificationsSupported() }
+
+func (n *desktopNotifier) Notify(id, title, subtitle, body string) {
+	if !n.Supported() {
+		return
+	}
+	go func() {
+		err := mygo.NewNotification(mygo.NotificationOptions{ID: id, Title: title, Subtitle: subtitle, Body: body, Group: "runs"}).Show()
+		switch {
+		case errors.Is(err, mygo.ErrNotificationsDenied):
+			if !n.denied.Swap(true) { // said once per launch
+				slog.Warn("notifications denied by the user")
+			}
+		case err != nil:
+			slog.Error("show notification", "id", id, "err", err)
+		default:
+			slog.Info("notification shown", "id", id)
+		}
+	}()
 }

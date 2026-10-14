@@ -41,6 +41,7 @@ const (
 	setJQLExtra     = "jql_extra"
 	setJiraKeyField = "jira_key_field"
 	setTheme        = "theme"
+	setNotify       = "notify"
 	setAppIcon      = appicon.SettingKey
 )
 
@@ -51,6 +52,8 @@ type App struct {
 	Post func(fn func())
 	// LogPath is the diagnostic log file, shown in Settings so a problem can be traced.
 	LogPath string
+	// Notifier, if set, tells the user when a run finishes.
+	Notifier Notifier
 
 	engine  syncjob.Engine
 	store   *syncjob.Store
@@ -303,6 +306,8 @@ func (a *App) startRun(id int, opts syncjob.RunOptions) {
 			return // deleted while syncing
 		}
 		rid := a.store.AddRun(run)
+		run.ID = rid
+		a.notifyRun(job, run)
 		// Someone watching the live run now sees the saved one in its place.
 		if a.router.Path() == fmt.Sprintf("/jobs/%d/report", id) && a.router.Query("run") == liveRun {
 			a.router.Replace(fmt.Sprintf("/jobs/%d/report?run=%d", id, rid))
