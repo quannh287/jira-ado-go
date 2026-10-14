@@ -80,6 +80,14 @@ func main() {
 	})
 	// What the user sees in the app needn't wait in Notification Center.
 	mygo.App.OnDidBecomeActive(mygo.ClearNotifications)
+	// Closing the window only hides it, so running syncs go on; Cmd+Q still quits.
+	var quitting bool
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { quitting = true })
+	mygo.App.OnActivate(func(hasVisibleWindows bool) {
+		if win != nil && !hasVisibleWindows {
+			win.Show()
+		}
+	})
 
 	mygo.App.WhenReady(func() {
 		win = mygo.NewWindow(mygo.WindowOptions{
@@ -93,6 +101,12 @@ func main() {
 			TitleBarHeight:  app.TitleBarHeight,
 			BackgroundColor: "light-dark(#ffffff, #1c1c1e)", // shown before the first frame
 			Content:         ui.View(a.View),
+		})
+		win.OnClose(func(e *mygo.CloseEvent) {
+			if !quitting {
+				e.PreventDefault()
+				win.Hide()
+			}
 		})
 		appicon.SetIcon = mygo.App.Dock.SetIcon
 		appicon.Apply(store.Settings[appicon.SettingKey])
