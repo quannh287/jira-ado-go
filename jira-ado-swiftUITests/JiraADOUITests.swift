@@ -323,10 +323,10 @@ final class JiraADOUITests: XCTestCase {
 
     func testUpdateSheetAtLaunch() {
         launch(extra: ["-update-available"])
-        wait(text("jira-ado 9.9.9 is available"))
+        wait(text("JirAdo 9.9.9 is available"))
         XCTAssertTrue(button("Download").exists && button("Skip This Version").exists)
         button("Later").click()
-        XCTAssertTrue(text("jira-ado 9.9.9 is available").waitForNonExistence(timeout: 5))
+        XCTAssertTrue(text("JirAdo 9.9.9 is available").waitForNonExistence(timeout: 5))
     }
 
     // MARK: Launch performance

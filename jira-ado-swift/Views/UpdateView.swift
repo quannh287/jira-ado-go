@@ -10,7 +10,7 @@ struct UpdateSheet: View {
             HStack(spacing: 12) {
                 Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 48, height: 48)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("jira-ado \(update.version) is available").font(.title3.bold())
+                    Text("JirAdo \(update.version) is available").font(.title3.bold())
                     Text("You have \(model.currentVersion). Download the new version, then drag it into Applications.")
                         .font(.callout).foregroundStyle(.secondary)
                 }
@@ -65,7 +65,7 @@ struct UpdateSettings: View {
                 Text(model.lastUpdateCheck.timeIntervalSince1970 > 0 ? "Last checked " + ago(model.lastUpdateCheck, Date()) : "Never checked")
                     .font(.callout).foregroundStyle(.secondary)
             }
-            Text("Once a day, jira-ado asks GitHub whether a newer release exists and offers to download it. Nothing is installed by itself.")
+            Text("Once a day, JirAdo asks GitHub whether a newer release exists and offers to download it. Nothing is installed by itself.")
                 .font(.callout).foregroundStyle(.secondary)
         }
     }

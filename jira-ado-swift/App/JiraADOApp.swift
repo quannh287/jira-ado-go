@@ -7,7 +7,7 @@ struct JiraADOApp: App {
     private let model = AppModel.shared
 
     var body: some Scene {
-        Window("jira-ado", id: "main") {
+        Window("JirAdo", id: "main") {
             RootView()
                 .environment(model)
                 .frame(minWidth: 900, minHeight: 560)

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import jira_ado
+@testable import JirAdo
 
 @Test func sqliteRoundTrip() throws {
     let path = FileManager.default.temporaryDirectory.appendingPathComponent("jira-ado-\(UUID()).db").path

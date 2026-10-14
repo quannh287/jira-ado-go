@@ -84,13 +84,13 @@ jobs:
             -destination 'generic/platform=macOS' -derivedDataPath build -quiet \
             ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
             MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" $SIGNING
-          app=build/Build/Products/Release/jira-ado.app
+          app=build/Build/Products/Release/JirAdo.app
           # Ad hoc signing adds get-task-allow (debugger attach); re-sign with the same entitlements minus that one.
           codesign -d --entitlements - --xml "$app" > entitlements.plist
           /usr/libexec/PlistBuddy -c 'Delete :com.apple.security.get-task-allow' entitlements.plist || true
           codesign --force --sign - --options runtime --entitlements entitlements.plist "$app"
           codesign -d --entitlements - "$app"
-          lipo -archs "$app/Contents/MacOS/jira-ado"
+          lipo -archs "$app/Contents/MacOS/JirAdo"
           codesign --verify --strict "$app"
           echo "APP=$app" >> "$GITHUB_ENV"
       - name: Disk image

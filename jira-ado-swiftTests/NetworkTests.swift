@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import jira_ado
+@testable import JirAdo
 
 /// Answers every request from `handler`, recording what was asked.
 nonisolated final class StubProtocol: URLProtocol, @unchecked Sendable {

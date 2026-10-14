@@ -8,7 +8,7 @@ Native macOS app in Swift/SwiftUI (Xcode 26+, maintained with Xcode 27; macOS 26
 
 ## Commands
 
-- `xcodebuild -project jira-ado-swift.xcodeproj -scheme jira-ado-swift build` — build (product `jira-ado.app`, module `jira_ado`)
+- `xcodebuild -project jira-ado-swift.xcodeproj -scheme jira-ado-swift build` — build (product `JirAdo.app`, module `JirAdo`)
 - `xcodebuild test -project jira-ado-swift.xcodeproj -scheme jira-ado-swift -destination 'platform=macOS'` — unit + UI tests (UI tests need a GUI session with Accessibility rights; CI runs unit tests only)
 - add `-only-testing:jira-ado-swiftTests` (unit) or `-only-testing:jira-ado-swiftTests/<Suite>/<test>()` (quote it in zsh)
 - `JIRA_ADO_DEMO=1` (scheme Run environment, off by default) — fake engine on the real database, demo jobs when empty
@@ -36,7 +36,7 @@ Native macOS app in Swift/SwiftUI (Xcode 26+, maintained with Xcode 27; macOS 26
 
 ## Tests
 
-- Unit (`jira-ado-swiftTests`, Swift Testing, `@testable import jira_ado`): syncer flows with `FakeJira`/`FakeADO`, store/SQLite, network via `StubProtocol` (`NetworkTests` is `.serialized` because it swaps the shared session), models, formatting, `AppModel` with `ScriptedEngine`/`RecordingNotifier`.
+- Unit (`jira-ado-swiftTests`, Swift Testing, `@testable import JirAdo`): syncer flows with `FakeJira`/`FakeADO`, store/SQLite, network via `StubProtocol` (`NetworkTests` is `.serialized` because it swaps the shared session), models, formatting, `AppModel` with `ScriptedEngine`/`RecordingNotifier`.
 - UI (`jira-ado-swiftUITests`, XCUITest): on macOS SwiftUI `Text` is a static text whose **value** holds the string and `Table` is an **outline**; match buttons by label (toolbar buttons have no title identifier); inputs carry `accessibilityIdentifier`s (`login.*`, `job.*`, `settings.*`, `palette.search`, `empty.newJob`); a radio button's selection is its `value`. Failures print the accessibility tree.
 
 ## Releases

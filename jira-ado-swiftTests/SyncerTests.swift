@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import jira_ado
+@testable import JirAdo
 
 let t0 = Date(timeIntervalSince1970: 1_791_968_400)  // 2026-10-14 09:00 UTC
 let sprintFieldID = "customfield_10020"

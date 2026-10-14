@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import jira_ado
+@testable import JirAdo
 
 final class RecordingNotifier: Notifier {
     var sent: [(id: String, title: String, subtitle: String, body: String)] = []

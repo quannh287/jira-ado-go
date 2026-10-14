@@ -55,7 +55,7 @@ struct SettingsView: View {
                 .pickerStyle(.segmented)
                 LabeledContent("Test") {
                     Button("Send Test Notification", systemImage: "bell") {
-                        model.notifier.notify(id: AppModel.testNotificationID, title: "jira-ado", subtitle: "Notifications work",
+                        model.notifier.notify(id: AppModel.testNotificationID, title: "JirAdo", subtitle: "Notifications work",
                                               body: "Click to come back to Settings. Run notifications open their report.")
                     }
                 }

@@ -32,7 +32,7 @@ struct MenuBarMenu: View {
             .disabled(!model.store.jobs.contains { $0.status == .active })
         }
         Divider()
-        Button("Open jira-ado") { show {} }.keyboardShortcut("o")
+        Button("Open JirAdo") { show {} }.keyboardShortcut("o")
         if !model.pat.isEmpty {
             Button("New Sync Job…") { show { model.open(.dashboard, [.create]) } }.keyboardShortcut("n")
         }
@@ -42,7 +42,7 @@ struct MenuBarMenu: View {
             Button("Check for Updates…") { show { Task { await model.checkForUpdates(manual: true) } } }
         }
         Divider()
-        Button("Quit jira-ado") { NSApp.terminate(nil) }.keyboardShortcut("q")
+        Button("Quit JirAdo") { NSApp.terminate(nil) }.keyboardShortcut("q")
     }
 
     /// Brings the window forward: a menu bar app isn't active until asked.

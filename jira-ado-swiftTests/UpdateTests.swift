@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import jira_ado
+@testable import JirAdo
 
 @Test(arguments: [("0.5.0", "0.4.0", true), ("0.10.0", "0.9.1", true), ("v1.0", "0.9.9", true), ("0.4.1", "0.4", true),
                   ("0.4.0", "0.4.0", false), ("0.4", "0.4.0", false), ("0.3.9", "0.4.0", false),
@@ -37,7 +37,7 @@ private let release = AppUpdate(version: "0.5.0", notes: "notes", download: page
         await m.checkForUpdates(manual: false)
         #expect(m.updateSheet == nil && m.notice == nil)
         await m.checkForUpdates(manual: true)
-        #expect(m.updateSheet == nil && m.notice == "jira-ado 0.4.0 is the latest version")
+        #expect(m.updateSheet == nil && m.notice == "JirAdo 0.4.0 is the latest version")
     }
 
     @Test func skippedVersionStaysQuietOnAutomaticChecks() async {

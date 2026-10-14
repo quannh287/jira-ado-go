@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import jira_ado
+@testable import JirAdo
 
 @Test func runStatus() {
     #expect(Run().status == .success)

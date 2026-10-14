@@ -397,7 +397,7 @@ final class AppModel {
         store.setSetting(Setting.updateLastCheck, String(Int(now().timeIntervalSince1970)))
         guard let latest, isNewer(latest.version, than: currentVersion) else {
             availableUpdate = nil
-            if manual { show("jira-ado \(currentVersion) is the latest version") }
+            if manual { show("JirAdo \(currentVersion) is the latest version") }
             return
         }
         AppLog.info("update available", ["current": currentVersion, "latest": latest.version])
