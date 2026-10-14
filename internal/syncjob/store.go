@@ -66,6 +66,8 @@ var migrations = [][]string{{
 		PRIMARY KEY (ado_work_item_id, jira_comment_id))`,
 }, {
 	`ALTER TABLE runs ADD COLUMN kind TEXT NOT NULL DEFAULT ''`,
+}, {
+	`ALTER TABLE tickets ADD COLUMN parent_key TEXT NOT NULL DEFAULT ''`,
 }}
 
 // NewStore is an in-memory store, for tests and demos.
@@ -171,7 +173,7 @@ func (s *Store) load(ctx context.Context) error {
 		s.nextRun = max(s.nextRun, run.ID)
 	}
 
-	tickets, err := s.db.Query(ctx, `SELECT run_id, key, summary, outcome, error, calls, work_item_type, ado_id, message FROM tickets ORDER BY id`)
+	tickets, err := s.db.Query(ctx, `SELECT run_id, key, summary, outcome, error, calls, work_item_type, ado_id, message, parent_key FROM tickets ORDER BY id`)
 	if err != nil {
 		return err
 	}
@@ -181,7 +183,7 @@ func (s *Store) load(ctx context.Context) error {
 			continue
 		}
 		t := Ticket{Key: r[1].(string), Summary: r[2].(string), Outcome: Outcome(r[3].(string)), Error: r[4].(string),
-			WorkItemType: r[6].(string), ADOID: toInt(r[7]), Message: r[8].(string)}
+			WorkItemType: r[6].(string), ADOID: toInt(r[7]), Message: r[8].(string), ParentKey: r[9].(string)}
 		if err := unmarshal(r[5], &t.Calls); err != nil {
 			return err
 		}
@@ -284,8 +286,8 @@ func (s *Store) AddRun(r Run) int {
 	stmts := []sqlite.Statement{stmt(`INSERT INTO runs (id, job_id, started, duration_ms, since, error, kind) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.JobID, r.Started.UnixMilli(), r.Duration.Milliseconds(), r.Since, r.Error, r.Kind)}
 	for _, t := range r.Tickets {
-		stmts = append(stmts, stmt(`INSERT INTO tickets (run_id, key, summary, outcome, error, calls, work_item_type, ado_id, message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			r.ID, t.Key, t.Summary, string(t.Outcome), t.Error, marshal(orEmpty(t.Calls)), t.WorkItemType, t.ADOID, t.Message))
+		stmts = append(stmts, stmt(`INSERT INTO tickets (run_id, key, summary, outcome, error, calls, work_item_type, ado_id, message, parent_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			r.ID, t.Key, t.Summary, string(t.Outcome), t.Error, marshal(orEmpty(t.Calls)), t.WorkItemType, t.ADOID, t.Message, t.ParentKey))
 	}
 	s.write(stmts...)
 	return r.ID

@@ -42,6 +42,9 @@ func (r *run) process(ctx context.Context, is jira.Issue) (t syncjob.Ticket) {
 	}
 	d := details[0]
 	t.Key, t.Summary = d.Key, d.Fields.Summary
+	if p := d.Fields.Parent; p != nil {
+		t.ParentKey = p.Key
+	}
 	f := r.fieldsOf(d)
 	t.WorkItemType = f.wiType
 

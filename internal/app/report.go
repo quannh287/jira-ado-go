@@ -161,8 +161,8 @@ func (a *App) runDetail(c *ui.Context, j *syncjob.Job, r syncjob.Run, p *syncjob
 			})
 			ui.Text(c, "Tickets").Bold()
 			ui.Column(c).Gap(6).Children(func() {
-				for i, tk := range r.Tickets {
-					a.ticket(c, fmt.Sprintf("%d/%d", r.ID, i), j, tk)
+				for _, g := range groupTickets(r.Tickets) {
+					a.ticketGroup(c, r, j, g)
 				}
 			})
 		})
@@ -334,4 +334,97 @@ func kindLabel(kind string) string {
 		return "retry"
 	}
 	return kind
+}
+
+// ticketGroup is a top-level ticket (or a parent that isn't in the run) with its sub-tasks.
+type ticketGroup struct {
+	parent    int    // index into the run's tickets, -1 when the parent wasn't synced in this run
+	parentKey string // set when parent is -1
+	children  []int
+}
+
+// groupTickets nests sub-tasks under their parent, in the order tickets first appear.
+func groupTickets(tickets []syncjob.Ticket) []ticketGroup {
+	byKey := map[string]int{}
+	for i, t := range tickets {
+		byKey[t.Key] = i
+	}
+	var groups []ticketGroup
+	at := map[string]int{} // parent key → index in groups
+	group := func(key string, parent int) *ticketGroup {
+		if g, ok := at[key]; ok {
+			return &groups[g]
+		}
+		at[key] = len(groups)
+		groups = append(groups, ticketGroup{parent: parent, parentKey: key})
+		return &groups[len(groups)-1]
+	}
+	for i, t := range tickets {
+		if p, ok := byKey[t.ParentKey]; ok && t.ParentKey != "" && p != i {
+			g := group(t.ParentKey, p)
+			g.children = append(g.children, i)
+			continue
+		}
+		if t.ParentKey != "" { // parent not synced in this run: a header still gathers its sub-tasks
+			g := group(t.ParentKey, -1)
+			g.children = append(g.children, i)
+			continue
+		}
+		g := group(t.Key, i)
+		g.parent = i // a sub-task listed before its parent created the group with -1
+	}
+	return groups
+}
+
+func (a *App) ticketGroup(c *ui.Context, r syncjob.Run, j *syncjob.Job, g ticketGroup) {
+	t := c.Theme()
+	key := func(i int) string { return fmt.Sprintf("%d/%d", r.ID, i) }
+	ui.Column(c.Key("group-" + g.parentKey)).Gap(6).Children(func() {
+		if g.parent >= 0 {
+			a.ticket(c, key(g.parent), j, r.Tickets[g.parent])
+		} else {
+			ui.Row(c).Gap(8).Padding(6, 12).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, g.parentKey).Bold().Font("monospace").FontSize(12)
+				ui.Text(c, "parent not in this run").FontSize(12).TextColor(t.TextMuted)
+			})
+		}
+		if len(g.children) == 0 {
+			return
+		}
+		// Open by default: the flag records that the user folded the sub-tasks away.
+		folded := a.openFlag(fmt.Sprintf("%d/folded/%s", r.ID, g.parentKey))
+		counts := map[syncjob.Outcome]int{}
+		for _, i := range g.children {
+			counts[r.Tickets[i].Outcome]++
+		}
+		var parts []string
+		for _, o := range syncjob.Outcomes {
+			if counts[o] > 0 {
+				parts = append(parts, fmt.Sprintf("%d %s", counts[o], o))
+			}
+		}
+		label := plural(len(g.children), "sub-task") + " · " + strings.Join(parts, ", ")
+		toggle := ui.ButtonBase(c.Key("fold")).Row().Gap(6).Padding(2, 8).Margin(0, 0, 0, 22).Radius(6).AlignSelf(ui.Start).
+			Label(label).TextColor(t.TextMuted)
+		if toggle.Hovered() {
+			toggle.Background(t.SurfaceHover)
+		}
+		toggle.Children(func() {
+			icon := iconChevronDown
+			if *folded {
+				icon = iconChevron
+			}
+			ui.Icon(c, icon).Size(12, 12)
+			ui.Text(c, label).FontSize(12)
+		}).OnClick(func() { *folded = !*folded })
+		if *folded {
+			return
+		}
+		// Sub-tasks hang off a rule on the left, under their parent.
+		ui.Column(c).Gap(6).Margin(0, 0, 0, 22).Padding(0, 0, 0, 12).BorderWidth(0, 0, 0, 2).BorderColor(t.Border).Children(func() {
+			for _, i := range g.children {
+				a.ticket(c, key(i), j, r.Tickets[i])
+			}
+		})
+	})
 }

@@ -144,6 +144,7 @@ type APICall struct {
 type Ticket struct {
 	Key          string
 	Summary      string
+	ParentKey    string // the Jira parent of a sub-task, for grouping the report; "" for top-level issues
 	Outcome      Outcome
 	WorkItemType string
 	ADOID        int

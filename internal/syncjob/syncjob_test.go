@@ -160,7 +160,7 @@ func TestMigrateLegacyDatabase(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, col := range []string{"runs DROP COLUMN kind", "runs DROP COLUMN since", "runs DROP COLUMN error", "tickets DROP COLUMN work_item_type", "tickets DROP COLUMN ado_id", "tickets DROP COLUMN message"} {
+	for _, col := range []string{"tickets DROP COLUMN parent_key", "runs DROP COLUMN kind", "runs DROP COLUMN since", "runs DROP COLUMN error", "tickets DROP COLUMN work_item_type", "tickets DROP COLUMN ado_id", "tickets DROP COLUMN message"} {
 		if _, err := s.db.Execute(ctx, "ALTER TABLE "+col); err != nil {
 			t.Fatal(err)
 		}

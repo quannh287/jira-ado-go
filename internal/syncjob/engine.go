@@ -74,6 +74,9 @@ func (f *Fake) Sync(ctx context.Context, _ Connection, j Job, opts RunOptions) R
 		if len(opts.Keys) > 0 {
 			t.Key = opts.Keys[i]
 		}
+		if i > 0 && f.rnd.IntN(2) == 0 { // about half become sub-tasks of the first ticket, as in real backlogs
+			t.ParentKey, t.WorkItemType = run.Tickets[0].Key, TypeTask
+		}
 		run.Tickets = append(run.Tickets, t)
 		report()
 	}

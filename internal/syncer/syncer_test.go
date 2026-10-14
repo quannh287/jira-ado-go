@@ -258,6 +258,9 @@ func TestFirstRunCreatesParentsThenSubtasks(t *testing.T) {
 	if strings.Contains(j.jqls[0], "updated >=") {
 		t.Fatalf("first run must import the whole backlog, got %q", j.jqls[0])
 	}
+	if run.Tickets[1].ParentKey != "SE-1" || run.Tickets[0].ParentKey != "" {
+		t.Fatalf("parent keys %q %q", run.Tickets[0].ParentKey, run.Tickets[1].ParentKey)
+	}
 	if len(run.Tickets) != 2 || run.Tickets[0].Key != "SE-1" || run.Count(syncjob.Created) != 2 {
 		t.Fatalf("tickets %+v", run.Tickets)
 	}
