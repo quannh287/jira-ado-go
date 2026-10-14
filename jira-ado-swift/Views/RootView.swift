@@ -25,6 +25,7 @@ struct RootView: View {
             }
         }
         .overlay(alignment: .bottom) { Toast() }
+        .sheet(item: $model.updateSheet) { UpdateSheet(update: $0) }
         .onAppear { model.openMainWindow = { [openWindow] in openWindow(id: "main") } }
     }
 

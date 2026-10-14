@@ -81,6 +81,13 @@ final class AppModel {
     @ObservationIgnored private var timedOut: Set<Int> = []
     private(set) var running: Set<Int> = []
     var catalog = CatalogState()
+    /// The newer release found by the last check; the sheet shows while updateSheet is set.
+    var availableUpdate: AppUpdate?
+    var updateSheet: AppUpdate?
+    var checkingUpdate = false
+    /// Where the latest release comes from: nothing unless launch wires GitHub, so tests never reach the network.
+    @ObservationIgnored var latestRelease: () async throws -> AppUpdate? = { nil }
+    @ObservationIgnored var currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
 
     @ObservationIgnored var openMainWindow: (() -> Void)?
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
@@ -109,7 +116,13 @@ final class AppModel {
                 store.setSetting(Setting.adoUser, "UI Tester")
             }
             if !args.contains(LaunchArgument.empty) { Task { await FakeEngine(delay: 0).seed(store) } }
-            return AppModel(store: store, engine: fake, secrets: .memory(pat: pat), notifier: SilentNotifier())
+            let model = AppModel(store: store, engine: fake, secrets: .memory(pat: pat), notifier: SilentNotifier())
+            model.latestRelease = {
+                guard args.contains(LaunchArgument.updateAvailable) else { return nil }
+                let page = URL(string: "https://github.com/\(GitHubReleases.repo)/releases/tag/v9.9.9")!
+                return AppUpdate(version: "9.9.9", notes: "- **Menu bar** improvements\n- Faster syncs", download: page, page: page)
+            }
+            return model
         }
         AppLog.setup()
         let demo = env["JIRA_ADO_DEMO"] == "1"
@@ -129,6 +142,7 @@ final class AppModel {
             store = Store()
         }
         let model = AppModel(store: store, engine: demo ? FakeEngine(delay: 1.5) : Syncer(state: store), secrets: .keychain, notifier: UserNotifier())
+        model.latestRelease = { try await GitHubReleases.latest() }
         if let openError { model.show(openError) }
         if demo && store.jobs.isEmpty { Task { await FakeEngine(delay: 0).seed(store) } }
         return model
@@ -340,6 +354,7 @@ final class AppModel {
     /// Starts every active Scheduler job whose interval has passed since its last run (or its creation).
     func tick() {
         updateBadge()
+        if updateCheckDue { Task { await checkForUpdates(manual: false) } }
         guard !pat.isEmpty else { return }  // signed out: every run would fail on the missing PAT
         let now = now()
         for j in store.jobs where j.type == .scheduler && j.status == .active && !running.contains(j.id) {
@@ -351,6 +366,54 @@ final class AppModel {
     /// The Dock badge counts jobs whose last run didn't fully succeed.
     func updateBadge() {
         badge(store.jobs.filter { store.lastRun($0.id).map { $0.status != .success } ?? false }.count)
+    }
+
+    // MARK: Updates
+
+    static let updateInterval: TimeInterval = 86400
+
+    /// Automatic checks: on unless turned off in Settings.
+    var autoUpdateCheck: Bool { setting(Setting.updateAuto) != "off" }
+
+    func setAutoUpdateCheck(_ on: Bool) { store.setSetting(Setting.updateAuto, on ? "on" : "off") }
+
+    /// An automatic check runs a day after the last one that reached GitHub.
+    var updateCheckDue: Bool { autoUpdateCheck && !checkingUpdate && now().timeIntervalSince(lastUpdateCheck) >= Self.updateInterval }
+
+    var lastUpdateCheck: Date { Date(timeIntervalSince1970: Double(setting(Setting.updateLastCheck)) ?? 0) }
+
+    /// Asks GitHub for the latest release. An automatic check is silent unless there's a version not skipped;
+    /// a manual one also says "up to date" or why it failed, and shows a skipped version again.
+    func checkForUpdates(manual: Bool) async {
+        guard !checkingUpdate else { return }
+        checkingUpdate = true
+        defer { checkingUpdate = false }
+        let latest: AppUpdate?
+        do { latest = try await latestRelease() } catch {
+            AppLog.warn("update check failed", ["manual": manual, "err": describe(error)])
+            if manual { show("Couldn't check for updates: " + describe(error)) }
+            return
+        }
+        store.setSetting(Setting.updateLastCheck, String(Int(now().timeIntervalSince1970)))
+        guard let latest, isNewer(latest.version, than: currentVersion) else {
+            availableUpdate = nil
+            if manual { show("jira-ado \(currentVersion) is the latest version") }
+            return
+        }
+        AppLog.info("update available", ["current": currentVersion, "latest": latest.version])
+        availableUpdate = latest
+        if manual || latest.version != setting(Setting.updateSkipped) { updateSheet = latest }
+    }
+
+    /// Opens the DMG download in the browser; the user drags the app into Applications as usual.
+    func downloadUpdate(_ u: AppUpdate) {
+        NSWorkspace.shared.open(u.download)
+        updateSheet = nil
+    }
+
+    func skipUpdate(_ u: AppUpdate) {
+        store.setSetting(Setting.updateSkipped, u.version)
+        updateSheet = nil
     }
 
     // MARK: Menu bar
@@ -463,6 +526,7 @@ enum LaunchArgument {
     static let uiTesting = "-ui-testing"  // in-memory store, fake engine, demo jobs
     static let signedIn = "-signed-in"  // skip the login page
     static let empty = "-empty"  // no demo jobs
+    static let updateAvailable = "-update-available"  // the update check finds version 9.9.9
 }
 
 /// Notifications through Notification Center; the first one waits for the user's permission answer.

@@ -36,6 +36,11 @@ struct MenuBarMenu: View {
         if !model.pat.isEmpty {
             Button("New Sync Job…") { show { model.open(.dashboard, [.create]) } }.keyboardShortcut("n")
         }
+        if let u = model.availableUpdate {
+            Button("Update to \(u.version)…") { show { model.updateSheet = u } }
+        } else {
+            Button("Check for Updates…") { show { Task { await model.checkForUpdates(manual: true) } } }
+        }
         Divider()
         Button("Quit jira-ado") { NSApp.terminate(nil) }.keyboardShortcut("q")
     }

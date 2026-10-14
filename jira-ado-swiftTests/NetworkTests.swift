@@ -247,6 +247,30 @@ struct NetworkTests {
         await #expect(throws: Failure.self) { try await ADOClient.connectionData(org: "o", pat: "x") }
     }
 
+    // MARK: GitHub releases
+
+    @Test func latestReleaseFindsTheDMG() async throws {
+        StubProtocol.respond { _ in (200, #"{"tag_name":"v0.5.0","html_url":"https://github.com/o/r/releases/tag/v0.5.0","body":"- fix","assets":[{"name":"notes.txt","browser_download_url":"https://x/notes.txt"},{"name":"jira-ado-0.5.0.dmg","browser_download_url":"https://x/jira-ado-0.5.0.dmg"}]}"#) }
+        let u = try await GitHubReleases.latest(repo: "o/r")
+        #expect(u.version == "0.5.0" && u.notes == "- fix" && u.download.absoluteString == "https://x/jira-ado-0.5.0.dmg")
+        let req = StubProtocol.requests[0]
+        #expect(req.url == "https://api.github.com/repos/o/r/releases/latest" && req.headers["Authorization"] == nil, "no token is sent")
+    }
+
+    @Test func latestReleaseWithoutDMGLinksThePage() async throws {
+        StubProtocol.respond { _ in (200, #"{"tag_name":"0.5.0","html_url":"https://github.com/o/r/releases/tag/0.5.0","assets":[]}"#) }
+        let u = try await GitHubReleases.latest(repo: "o/r")
+        #expect(u.version == "0.5.0" && u.download == u.page && u.notes.isEmpty)
+    }
+
+    @Test func latestReleaseErrors() async {
+        StubProtocol.respond { _ in (404, #"{"message":"Not Found"}"#) }
+        await #expect(throws: HTTPStatusError.self) { try await GitHubReleases.latest(repo: "o/r") }
+        #expect(StubProtocol.requests.count == 1, "a 404 isn't retried")
+        StubProtocol.respond { _ in (200, "{}") }
+        await #expect(throws: Failure.self) { try await GitHubReleases.latest(repo: "o/r") }
+    }
+
     @Test func syncerCatalogKeepsWhatLoaded() async {
         StubProtocol.respond { r in
             switch true {

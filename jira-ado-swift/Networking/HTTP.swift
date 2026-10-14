@@ -67,7 +67,7 @@ final class HTTPClient {
         var req = URLRequest(url: u)
         req.httpMethod = method
         req.httpBody = body
-        req.setValue(auth, forHTTPHeaderField: "Authorization")
+        if !auth.isEmpty { req.setValue(auth, forHTTPHeaderField: "Authorization") }
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         if !contentType.isEmpty { req.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         let (data, res) = try await Self.session.data(for: req)

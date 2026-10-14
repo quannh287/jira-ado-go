@@ -249,6 +249,9 @@ enum Setting {
     static let notify = "notify"
     static let appIcon = "app_icon"
     static let menuBar = "menu_bar"
+    static let updateAuto = "update_auto"
+    static let updateLastCheck = "update_last_check"  // seconds since 1970
+    static let updateSkipped = "update_skipped"
     static let rules = "mapping_rules"
     static let sharedUsers = "shared_users"
 }

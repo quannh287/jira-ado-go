@@ -16,6 +16,10 @@ struct JiraADOApp: App {
         .defaultSize(width: 1180, height: 760)
         .commands {
             SidebarCommands()
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { Task { await model.checkForUpdates(manual: true) } }
+                    .disabled(model.checkingUpdate)
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Sync Job") { model.open(.dashboard, [.create]) }
                     .keyboardShortcut("n")

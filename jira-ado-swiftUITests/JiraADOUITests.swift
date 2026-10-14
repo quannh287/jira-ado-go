@@ -14,9 +14,9 @@ final class JiraADOUITests: XCTestCase {
     }
 
     @discardableResult
-    private func launch(signedIn: Bool = true, empty: Bool = false) -> XCUIApplication {
+    private func launch(signedIn: Bool = true, empty: Bool = false, extra: [String] = []) -> XCUIApplication {
         app = XCUIApplication()
-        app.launchArguments = ["-ui-testing"] + (signedIn ? ["-signed-in"] : []) + (empty ? ["-empty"] : [])
+        app.launchArguments = ["-ui-testing"] + (signedIn ? ["-signed-in"] : []) + (empty ? ["-empty"] : []) + extra
         app.launch()
         app.activate()
         return app
@@ -317,6 +317,16 @@ final class JiraADOUITests: XCTestCase {
         button("Lane change").click()
         XCTAssertTrue(button("Lane change").isSelected)
         XCTAssertFalse(button("Bridge").isSelected)
+    }
+
+    // MARK: Updates
+
+    func testUpdateSheetAtLaunch() {
+        launch(extra: ["-update-available"])
+        wait(text("jira-ado 9.9.9 is available"))
+        XCTAssertTrue(button("Download").exists && button("Skip This Version").exists)
+        button("Later").click()
+        XCTAssertTrue(text("jira-ado 9.9.9 is available").waitForNonExistence(timeout: 5))
     }
 
     // MARK: Launch performance

@@ -45,6 +45,7 @@ struct SettingsView: View {
                 Text("The menu bar icon shows syncs and failures and replaces the Dock icon. Off: the app sits in the Dock and ⌘Tab instead.")
                     .font(.callout).foregroundStyle(.secondary)
             }
+            UpdateSettings()
             Section("Notifications") {
                 Picker("When a run ends", selection: Binding(get: { model.notifyMode }, set: { model.store.setSetting(Setting.notify, $0.rawValue) })) {
                     Text("Every run").tag(NotifyMode.all)
