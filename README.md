@@ -2,7 +2,7 @@
 
 # jira-ado
 
-A native desktop app that syncs Jira issues into Azure DevOps work items, one way (Jira → ADO). It's written in Go with [MyGo](https://github.com/egoist/mygo), and its UI is drawn natively — no webview. It ports the Next.js app's sync engine and flow.
+A native desktop app that syncs Jira issues into Azure DevOps work items, one way (Jira → ADO). It's written in Go with [MyGo](https://github.com/egoist/mygo), and its UI is drawn natively — no webview.
 
 ## Features
 
@@ -71,15 +71,6 @@ go tool mygo build -platform darwin/universal # DMG in build/
 ```
 
 The architecture, conventions and pitfalls are documented in [CLAUDE.md](CLAUDE.md). The palette research is in [docs/design-system.md](docs/design-system.md).
-
-## Importing from the Next.js app
-
-`cmd/importmongo` copies jobs, cursors, comment mappings and run history from that app's MongoDB into this app's database. It reads MongoDB and never writes to it. Stop the app first.
-
-```sh
-node cmd/importmongo/export.mjs ~/path/to/nextjs-app /tmp/export
-go run ./cmd/importmongo -export /tmp/export -db "<app data>/jira-ado.db" -dry-run
-```
 
 ## Releases
 
