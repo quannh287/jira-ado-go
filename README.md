@@ -64,4 +64,4 @@ go run ./cmd/importmongo -export /tmp/export -db "<app data>/jira-ado.db" -dry-r
 
 ## Releases
 
-CI (`.github/workflows/build.yml`) runs tests, then builds macOS, Windows and Linux on every push. To release, push a tag: `git tag v0.3.0 && git push origin v0.3.0`. CI builds the apps with the tag's version, publishes the release with them attached, and then commits that version to `mygo.json` on `main` (run `git pull` afterwards).
+CI (`.github/workflows/build.yml`) runs the tests on every push and pull request. Apps are built only for tags, or on demand with **Actions → Build → Run workflow**, whose artifacts you can download. To release, push a tag: `git tag v0.3.0 && git push origin v0.3.0`. CI builds the apps with the tag's version, publishes the release with them attached, and then commits that version to `mygo.json` on `main` (run `git pull` afterwards).

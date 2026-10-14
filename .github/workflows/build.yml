@@ -1,5 +1,6 @@
 name: Build
 
+# Pushes to main and pull requests only test. A tag builds and releases; "Run workflow" builds on demand.
 # Releasing: push a tag, e.g. `git tag v0.3.0 && git push origin v0.3.0`.
 # The tag is the version: the apps are built with it, the release is published with them,
 # and mygo.json on main is bumped to it afterwards.
@@ -35,6 +36,8 @@ jobs:
         run: go test ./...
 
   build:
+    # Tags only (and manual runs), so a commit isn't built twice: once on main, again for its tag.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: test
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
