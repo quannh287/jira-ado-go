@@ -1,0 +1,6 @@
+{
+  "name": "jira-ado",
+  "identifier": "com.example.jiraado",
+  "version": "0.1.0",
+  "out": "build"
+}
