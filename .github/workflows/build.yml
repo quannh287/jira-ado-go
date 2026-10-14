@@ -1,5 +1,9 @@
 name: Build
 
+# Releasing: push a tag, e.g. `git tag v0.3.0 && git push origin v0.3.0`.
+# The tag is the version: the apps are built with it, the release is published with them,
+# and mygo.json on main is bumped to it afterwards.
+
 on:
   push:
     branches: [main]
@@ -8,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # the draft release on tags
+  contents: write # the release on tags, and the mygo.json bump on main
 
 concurrency:
   group: build-${{ github.ref }}
@@ -47,6 +51,16 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: Take the version from the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag $GITHUB_REF_NAME isn't vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          # Only on this runner: the app and its file names carry the tag's version.
+          jq --arg v "$version" '.version = $v' mygo.json > mygo.json.tmp && mv mygo.json.tmp mygo.json
       - name: Install NSIS, for the Windows installers
         if: matrix.name == 'Windows'
         run: sudo apt-get update && sudo apt-get install -y nsis
@@ -79,23 +93,44 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - name: Check the tag matches mygo.json
-        run: |
-          want="v$(jq -r .version mygo.json)"
-          if [ "$GITHUB_REF_NAME" != "$want" ]; then
-            echo "::error::tag $GITHUB_REF_NAME but mygo.json says $want; bump version first"
-            exit 1
-          fi
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-      - name: Draft the release with the apps
+      - name: Publish the release with the apps
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          if ! gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
-            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            # A rerun: replace the files and make sure it's published.
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+            gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME" --generate-notes --latest
           fi
-          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+
+  bump-version:
+    # After the release: main's mygo.json says the newest released version, so local builds match.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Commit the version to main
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          current=$(jq -r .version mygo.json)
+          newest=$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -1)
+          if [ "$current" = "$version" ] || [ "$newest" != "$version" ]; then
+            echo "mygo.json is $current; not moving it to $version"
+            exit 0
+          fi
+          jq --arg v "$version" '.version = $v' mygo.json > mygo.json.tmp && mv mygo.json.tmp mygo.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: release $GITHUB_REF_NAME"
+          # Pushed with GITHUB_TOKEN, so this commit doesn't start another workflow run.
+          git push origin HEAD:main
