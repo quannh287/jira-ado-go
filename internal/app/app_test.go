@@ -338,6 +338,16 @@ func TestMappingsPage(t *testing.T) {
 	if !tt.HasText("Mappings") || len(a.mappings.states) != 4 {
 		t.Fatalf("defaults not loaded: %+v", a.mappings)
 	}
+	if cat := a.catalog.cat; len(cat.JiraStatuses) == 0 || len(cat.ADOStates[syncjob.TypeTask]) == 0 || a.catalog.err != "" {
+		t.Fatalf("catalog not loaded: %+v", a.catalog)
+	}
+	// A saved value the lists don't know stays selectable instead of being dropped.
+	a.mappings.states = append(a.mappings.states, pair{"Legacy", "Legacy State"})
+	tt.Frame()
+	if !tt.HasText("Legacy State") {
+		t.Fatal("unknown saved value hidden by the select")
+	}
+	a.mappings.states = a.mappings.states[:len(a.mappings.states)-1]
 	must(t, tt.Click("Import from Jobs"))
 	a.mappings.types = append(a.mappings.types, pair{"Bug", "Bug"})
 	a.mappings.priorities = append(a.mappings.priorities, pair{"Blocker", "9"})

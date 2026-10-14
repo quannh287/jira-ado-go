@@ -77,3 +77,26 @@ func TestSprint(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectStatusesAndPriorities(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/project/CAT/statuses":
+			io.WriteString(w, `[{"name":"Story","statuses":[{"name":"To Do"},{"name":"Done"}]},{"name":"Sub-task","statuses":[{"name":"To Do"},{"name":"QA"}]}]`)
+		case "/priority":
+			io.WriteString(w, `[{"name":"Highest"},{"name":"Low"}]`)
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	c := NewWith(httpx.New(srv.URL, "x"))
+	types, statuses, err := c.ProjectStatuses(context.Background(), "CAT")
+	if err != nil || len(types) != 2 || len(statuses) != 4 || types[1] != "Sub-task" {
+		t.Fatalf("types %q statuses %q err %v", types, statuses, err)
+	}
+	p, err := c.Priorities(context.Background())
+	if err != nil || len(p) != 2 || p[0] != "Highest" {
+		t.Fatalf("priorities %q err %v", p, err)
+	}
+}

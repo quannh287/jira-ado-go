@@ -124,6 +124,43 @@ func (c *Client) NodeExists(ctx context.Context, kind, path string) (bool, error
 	return err == nil, err
 }
 
+// WorkItemTypes lists the project's enabled work item types.
+func (c *Client) WorkItemTypes(ctx context.Context) ([]string, error) {
+	var out struct {
+		Value []struct {
+			Name       string `json:"name"`
+			IsDisabled bool   `json:"isDisabled"`
+		} `json:"value"`
+	}
+	if err := c.send(ctx, "GET", "/wit/workitemtypes?api-version="+apiVersion, "", nil, &out); err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, t := range out.Value {
+		if !t.IsDisabled {
+			names = append(names, t.Name)
+		}
+	}
+	return names, nil
+}
+
+// States lists a work item type's states in workflow order.
+func (c *Client) States(ctx context.Context, workItemType string) ([]string, error) {
+	var out struct {
+		Value []struct {
+			Name string `json:"name"`
+		} `json:"value"`
+	}
+	if err := c.send(ctx, "GET", fmt.Sprintf("/wit/workitemtypes/%s/states?api-version=%s", url.PathEscape(workItemType), apiVersion), "", nil, &out); err != nil {
+		return nil, err
+	}
+	names := make([]string, len(out.Value))
+	for i, s := range out.Value {
+		names[i] = s.Name
+	}
+	return names, nil
+}
+
 // Relation is one link of a work item: a parent, a child, an attached file…
 type Relation struct {
 	Rel string `json:"rel"`

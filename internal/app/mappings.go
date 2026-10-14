@@ -1,9 +1,11 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -89,17 +91,59 @@ func (a *App) saveMappings() {
 	a.notice = "Mappings saved; the next sync uses them"
 }
 
+// catalogState is what Jira and ADO offer as mapping values, loaded once per visit to the page.
+type catalogState struct {
+	cat     syncjob.Catalog
+	loading bool
+	tried   bool
+	err     string
+}
+
+// loadCatalog asks the engine for the choices of every project the jobs use.
+func (a *App) loadCatalog() {
+	cs := &a.catalog
+	var jiraProjects, adoProjects []string
+	for _, j := range a.store.Jobs {
+		jiraProjects, adoProjects = append(jiraProjects, j.JiraKey), append(adoProjects, j.ADOProject)
+	}
+	jiraProjects, adoProjects = syncjob.Union(jiraProjects), syncjob.Union(adoProjects)
+	cs.tried, cs.loading, cs.err = true, true, ""
+	if len(jiraProjects) == 0 {
+		cs.loading, cs.err = false, "Create a sync job first; the lists come from its Jira and ADO projects."
+		return
+	}
+	conn := a.connection()
+	var cat syncjob.Catalog
+	var err error
+	a.Async(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		cat, err = a.engine.Catalog(ctx, conn, jiraProjects, adoProjects)
+	}, func() {
+		cs.loading, cs.cat = false, cat
+		if err != nil {
+			cs.err = err.Error()
+		}
+	})
+}
+
 func (a *App) mappingsPage(c *ui.Context) {
 	t := c.Theme()
 	if !a.mappings.loaded {
 		a.loadMappings()
 	}
+	if !a.catalog.tried { // once per launch; Refresh Options reloads
+		a.loadCatalog()
+	}
 	f := &a.mappings
+	cat := a.catalog.cat
 	err := f.mappingsError()
 	page(c, "Mappings", "Shared by every job", func() {
 		if err != "" {
 			ui.Text(c, err).FontSize(12).TextColor(t.Danger).SingleLine()
 		}
+		ui.Button(c.Key("refreshcat"), "Refresh Options").Disabled(a.catalog.loading).
+			Tooltip("Reload Jira statuses, issue types and priorities, and ADO types and states").OnClick(a.loadCatalog)
 		ui.Button(c.Key("reset"), "Reset Rules to Defaults").Tooltip("The source app's rules; shared users stay").OnClick(func() {
 			d := syncjob.DefaultRules()
 			f.types, f.states, f.taskStates, f.priorities = pairs(d.Types), pairs(d.States), pairs(d.TaskStates), pairs(d.Priorities)
@@ -110,22 +154,38 @@ func (a *App) mappingsPage(c *ui.Context) {
 	}, func() {
 		ui.Scroll(c).Grow(1).MinHeight(0).Children(func() {
 			ui.Column(c).MaxWidth(760).Gap(24).Padding(0, 0, 24, 0).Children(func() {
+				switch cs := a.catalog; {
+				case cs.loading:
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+						ui.Spinner(c).Label("Loading options")
+						ui.Text(c, "Loading statuses and types from Jira and ADO…").FontSize(12).TextColor(t.TextMuted)
+					})
+				case cs.err != "":
+					ui.Text(c, "Some lists couldn't load, so those fields take typed values: "+cs.err).FontSize(12).TextColor(t.Warning).Selectable()
+				}
 				a.sharedUsers(c)
+				// States of the backlog types this page maps to: the default, the overrides, and Scrum's usual two.
+				backlog := []string{f.defaultType, syncjob.TypePBI, "Bug"}
+				for _, p := range f.types {
+					if !syncjob.IsTask(p.to) {
+						backlog = append(backlog, p.to)
+					}
+				}
 				mapSection(c, "Work item types", "Which ADO work item type a Jira issue becomes.", func() {
 					ui.Form(c, func() {
-						ui.Field(c, "Sub-tasks", func() { ui.TextInput(c.Key("subtask"), &f.subtaskType).Placeholder(syncjob.TypeTask) })
-						ui.Field(c, "Everything else", func() { ui.TextInput(c.Key("default"), &f.defaultType).Placeholder(syncjob.TypePBI) })
+						ui.Field(c, "Sub-tasks", func() { choice(c, "subtask", &f.subtaskType, cat.ADOTypes, syncjob.TypeTask) })
+						ui.Field(c, "Everything else", func() { choice(c, "default", &f.defaultType, cat.ADOTypes, syncjob.TypePBI) })
 					})
-					pairRows(c, "types", &f.types, "Jira issue type (e.g. Bug)", "ADO type (e.g. Bug)", "Add Type Override")
+					pairRows(c, "types", &f.types, cat.JiraTypes, cat.ADOTypes, "Jira issue type (e.g. Bug)", "ADO type (e.g. Bug)", "Add Type Override")
 				})
 				mapSection(c, "States: backlog items", "Jira status → ADO state for PBIs, Bugs and other non-Task types. Unmapped statuses use the type's first state (New).", func() {
-					pairRows(c, "states", &f.states, "Jira status", "ADO state", "Add State")
+					pairRows(c, "states", &f.states, cat.JiraStatuses, cat.StatesFor(backlog...), "Jira status", "ADO state", "Add State")
 				})
 				mapSection(c, "States: tasks", "Jira status → ADO state for Tasks. Unmapped statuses use To Do.", func() {
-					pairRows(c, "taskstates", &f.taskStates, "Jira status", "ADO state", "Add State")
+					pairRows(c, "taskstates", &f.taskStates, cat.JiraStatuses, cat.StatesFor(syncjob.TypeTask, f.subtaskType), "Jira status", "ADO state", "Add State")
 				})
 				mapSection(c, "Priorities", "Jira priority → ADO priority 1 (highest) to 4. Unmapped priorities use 4.", func() {
-					pairRows(c, "priorities", &f.priorities, "Jira priority", "1–4", "Add Priority")
+					pairRows(c, "priorities", &f.priorities, cat.JiraPriorities, adoPriorities, "Jira priority", "1–4", "Add Priority")
 				})
 			})
 		})
@@ -182,16 +242,39 @@ func mapSection(c *ui.Context, title, desc string, body func()) {
 	})
 }
 
-// pairRows edits a from → to table in place.
-func pairRows(c *ui.Context, key string, rows *[]pair, fromHint, toHint, addLabel string) {
+var adoPriorities = []string{"1", "2", "3", "4"}
+
+// pairRows edits a from → to table in place; each side is a drop-down when its options are known.
+func pairRows(c *ui.Context, key string, rows *[]pair, fromOpts, toOpts []string, fromHint, toHint, addLabel string) {
 	t := c.Theme()
 	for i := range *rows {
 		ui.Row(c.Key(fmt.Sprint(key, i))).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.TextInput(c.Key("from"), &(*rows)[i].from).Placeholder(fromHint).Label(fromHint).Grow(1).Basis(0)
+			choice(c, "from", &(*rows)[i].from, fromOpts, fromHint).Grow(1).Basis(0)
 			ui.Text(c, "→").TextColor(t.TextMuted)
-			ui.TextInput(c.Key("to"), &(*rows)[i].to).Placeholder(toHint).Label(toHint).Grow(1).Basis(0)
+			choice(c, "to", &(*rows)[i].to, toOpts, toHint).Grow(1).Basis(0)
 			ui.Button(c.Key("remove"), "Remove").OnClick(func() { *rows = slices.Delete(*rows, i, i+1) })
 		})
 	}
-	ui.Button(c.Key(key+"add"), addLabel).AlignSelf(ui.Start).OnClick(func() { *rows = append(*rows, pair{}) })
+	ui.Button(c.Key(key+"add"), addLabel).AlignSelf(ui.Start).OnClick(func() {
+		*rows = append(*rows, pair{first(fromOpts), first(toOpts)}) // a select needs a value from its list
+	})
+}
+
+// choice is a select over options, or a text input while the options are unknown.
+// A saved value missing from the list stays selectable, so loading the lists never changes a rule.
+func choice(c *ui.Context, key string, value *string, options []string, hint string) ui.Element {
+	if len(options) == 0 {
+		return ui.TextInput(c.Key(key), value).Placeholder(hint).Label(hint)
+	}
+	if *value != "" && !slices.Contains(options, *value) { // exact: the select shows a value only when it is one of its options
+		options = append(slices.Clone(options), *value)
+	}
+	return ui.Select(c.Key(key), value, options).Label(hint)
+}
+
+func first(opts []string) string {
+	if len(opts) == 0 {
+		return ""
+	}
+	return opts[0]
 }

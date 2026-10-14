@@ -44,6 +44,20 @@ func (f *Fake) CheckJira(ctx context.Context, conn Connection) (string, error) {
 
 func (f *Fake) Check(context.Context, Connection, Job) ([]string, error) { return nil, nil }
 
+func (f *Fake) Catalog(ctx context.Context, _ Connection, _, _ []string) (Catalog, error) {
+	return Catalog{
+		JiraTypes:      []string{"Story", "Bug", "Task", "Sub-task", "Epic"},
+		JiraStatuses:   []string{"To Do", "In Progress", "In Review", "QA", "Done"},
+		JiraPriorities: []string{"Highest", "High", "Medium", "Low", "Lowest"},
+		ADOTypes:       []string{"Bug", "Epic", "Feature", TypePBI, TypeTask},
+		ADOStates: map[string][]string{
+			TypePBI:  {"New", "Approved", "Committed", "In Progress", "Verify Test", "Done", "Removed"},
+			"Bug":    {"New", "Approved", "Committed", "Done", "Removed"},
+			TypeTask: {"To Do", "In Progress", "Verify Test", "Done", "Removed"},
+		},
+	}, f.wait(ctx)
+}
+
 func (f *Fake) Sync(ctx context.Context, _ Connection, j Job, opts RunOptions) Run {
 	onProgress := opts.OnProgress
 	start := f.Now()

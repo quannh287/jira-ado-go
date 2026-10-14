@@ -188,6 +188,41 @@ func (c *Client) Download(ctx context.Context, contentURL string) ([]byte, error
 	return resp.Body, err
 }
 
+// ProjectStatuses lists a project's issue types and the statuses their workflows use, in Jira's order.
+func (c *Client) ProjectStatuses(ctx context.Context, project string) (types, statuses []string, err error) {
+	var out []struct {
+		Name     string `json:"name"`
+		Statuses []struct {
+			Name string `json:"name"`
+		} `json:"statuses"`
+	}
+	if err := c.json(ctx, "GET", "/project/"+url.PathEscape(project)+"/statuses", nil, &out); err != nil {
+		return nil, nil, fmt.Errorf("jira statuses of %s: %w", project, err)
+	}
+	for _, t := range out {
+		types = append(types, t.Name)
+		for _, s := range t.Statuses {
+			statuses = append(statuses, s.Name)
+		}
+	}
+	return types, statuses, nil
+}
+
+// Priorities lists the site's priority names, highest first.
+func (c *Client) Priorities(ctx context.Context) ([]string, error) {
+	var out []struct {
+		Name string `json:"name"`
+	}
+	if err := c.json(ctx, "GET", "/priority", nil, &out); err != nil {
+		return nil, fmt.Errorf("jira priorities: %w", err)
+	}
+	names := make([]string, len(out))
+	for i, p := range out {
+		names[i] = p.Name
+	}
+	return names, nil
+}
+
 // TimeZone is the account's time zone, the one Jira reads JQL dates in.
 func (c *Client) TimeZone(ctx context.Context) (*time.Location, error) {
 	var u struct {

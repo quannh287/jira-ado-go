@@ -249,6 +249,39 @@ type Engine interface {
 	// Check lists what would make a sync of j fail before it writes anything (missing ADO paths, no Sprint field).
 	Check(ctx context.Context, conn Connection, j Job) (problems []string, err error)
 	Sync(ctx context.Context, conn Connection, j Job, opts RunOptions) Run
+	// Catalog lists the values the Mappings page offers, for the given Jira and ADO projects.
+	Catalog(ctx context.Context, conn Connection, jiraProjects, adoProjects []string) (Catalog, error)
+}
+
+// Catalog is what Jira and ADO accept as mapping values; empty lists mean "type it yourself".
+type Catalog struct {
+	JiraTypes, JiraStatuses, JiraPriorities []string
+	ADOTypes                                []string
+	ADOStates                               map[string][]string // per ADO work item type
+}
+
+// StatesFor merges the states of the given ADO types, in first-seen order.
+func (c Catalog) StatesFor(types ...string) []string {
+	var lists [][]string
+	for _, t := range types {
+		lists = append(lists, c.ADOStates[t])
+	}
+	return Union(lists...)
+}
+
+// Union merges lists without duplicates (case-insensitive), keeping first-seen order.
+func Union(lists ...[]string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, l := range lists {
+		for _, s := range l {
+			if k := strings.ToLower(strings.TrimSpace(s)); k != "" && !seen[k] {
+				seen[k] = true
+				out = append(out, s)
+			}
+		}
+	}
+	return out
 }
 
 // RunOptions shape one Sync.

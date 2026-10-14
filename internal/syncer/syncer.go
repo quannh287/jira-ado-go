@@ -414,3 +414,53 @@ func jqlTime(t time.Time, loc *time.Location) string {
 	}
 	return t.In(loc).Format("2006/01/02 15:04")
 }
+
+// Catalog reads the mapping choices: Jira issue types, statuses and priorities, ADO work item types and their states.
+// A failure on one side still returns the other side's lists, with the error.
+func (e *Engine) Catalog(ctx context.Context, conn syncjob.Connection, jiraProjects, adoProjects []string) (syncjob.Catalog, error) {
+	cat := syncjob.Catalog{ADOStates: map[string][]string{}}
+	if m := conn.Missing(); m != "" {
+		return cat, fmt.Errorf("set the %s in Settings first", m)
+	}
+	var errs []error
+	jc := jira.New(strings.TrimRight(conn.JiraURL, "/"), conn.JiraEmail, conn.JiraToken)
+	var types, statuses [][]string
+	for _, p := range jiraProjects {
+		t, s, err := jc.ProjectStatuses(ctx, p)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		types, statuses = append(types, t), append(statuses, s)
+	}
+	cat.JiraTypes, cat.JiraStatuses = syncjob.Union(types...), syncjob.Union(statuses...)
+	if p, err := jc.Priorities(ctx); err != nil {
+		errs = append(errs, err)
+	} else {
+		cat.JiraPriorities = p
+	}
+	var adoTypes [][]string
+	for _, p := range adoProjects {
+		ac := ado.New(conn.ADOOrg, p, conn.PAT)
+		ts, err := ac.WorkItemTypes(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("ADO work item types of %s: %w", p, err))
+			continue
+		}
+		adoTypes = append(adoTypes, ts)
+		for _, t := range ts {
+			if _, done := cat.ADOStates[t]; done {
+				continue
+			}
+			states, err := ac.States(ctx, t)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("ADO states of %s: %w", t, err))
+				continue
+			}
+			cat.ADOStates[t] = states
+		}
+	}
+	cat.ADOTypes = syncjob.Union(adoTypes...)
+	slices.Sort(cat.ADOTypes)
+	return cat, errors.Join(errs...)
+}

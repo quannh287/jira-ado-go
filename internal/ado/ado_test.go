@@ -119,3 +119,26 @@ func TestHasParent(t *testing.T) {
 		t.Fatal("HasParent matched the wrong parent")
 	}
 }
+
+func TestWorkItemTypesAndStates(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/wit/workitemtypes"):
+			io.WriteString(w, `{"value":[{"name":"Bug"},{"name":"Old Type","isDisabled":true},{"name":"Task"}]}`)
+		case strings.HasSuffix(r.URL.EscapedPath(), "/wit/workitemtypes/Product%20Backlog%20Item/states"):
+			io.WriteString(w, `{"value":[{"name":"New"},{"name":"Done"}]}`)
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	c := NewWith(httpx.New(srv.URL, "x"), "org", "Tickets")
+	types, err := c.WorkItemTypes(context.Background())
+	if err != nil || len(types) != 2 || types[1] != "Task" {
+		t.Fatalf("types %q err %v", types, err)
+	}
+	states, err := c.States(context.Background(), "Product Backlog Item")
+	if err != nil || len(states) != 2 || states[0] != "New" {
+		t.Fatalf("states %q err %v", states, err)
+	}
+}

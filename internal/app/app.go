@@ -67,6 +67,7 @@ type App struct {
 
 	settings  settingsForm
 	mappings  mappingsForm
+	catalog   catalogState
 	palette   bool
 	collapsed bool
 	query     string
