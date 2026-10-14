@@ -2,6 +2,7 @@ package app
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -18,6 +19,11 @@ type draft struct {
 	step    int
 	job     syncjob.Job
 	editing int // the job being edited, 0 while creating one
+	// check is the last "Check in ADO" result for this draft.
+	checking bool
+	checked  []string
+	checkErr string
+	checkOK  bool
 }
 
 // editDraft loads a job into the wizard at step.
@@ -315,6 +321,7 @@ func (a *App) stepFilters(c *ui.Context) {
 		}
 	})
 
+	a.checkRow(c)
 	ui.Divider(c)
 	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Children(func() {
@@ -402,4 +409,50 @@ func filtersRows(c *ui.Context, f syncjob.Filters, area, iteration string) {
 	for _, u := range f.Users {
 		kv(c, u.Jira, u.ADOEmail)
 	}
+}
+
+// checkRow runs the engine's preflight on the draft: the paths and the Sprint field a sync needs.
+func (a *App) checkRow(c *ui.Context) {
+	t := c.Theme()
+	d := &a.draft
+	ui.Column(c).Gap(6).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Button(c.Key("check"), "Check in ADO").Disabled(d.checking).
+				Tooltip("Looks up the area and iteration paths in ADO and the Sprint field in Jira").OnClick(a.checkDraft)
+			switch {
+			case d.checking:
+				ui.Spinner(c).Label("Checking")
+			case d.checkErr != "":
+				ui.Text(c, d.checkErr).FontSize(12).TextColor(t.Danger)
+			case d.checkOK:
+				ui.Text(c, "✓ Paths exist in ADO; ready to sync").FontSize(12).TextColor(t.Success)
+			}
+		})
+		for _, p := range d.checked {
+			ui.Text(c, "• "+p).FontSize(12).TextColor(t.Danger)
+		}
+	})
+}
+
+func (a *App) checkDraft() {
+	d := &a.draft
+	conn, job := a.connection(), a.effectiveJob(d.job)
+	d.checking, d.checked, d.checkErr, d.checkOK = true, nil, "", false
+	var problems []string
+	var err error
+	a.Async(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		problems, err = a.engine.Check(ctx, conn, job)
+	}, func() {
+		d.checking = false
+		switch {
+		case err != nil:
+			d.checkErr = err.Error()
+		case len(problems) > 0:
+			d.checked = problems
+		default:
+			d.checkOK = true
+		}
+	})
 }

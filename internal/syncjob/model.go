@@ -162,6 +162,12 @@ const (
 
 var RunStatuses = []RunStatus{Success, Partial, Error}
 
+// Run kinds besides a normal sync.
+const (
+	KindDryRun = "dry-run" // read everything, write nothing to ADO
+	KindRetry  = "retry"   // only the given Jira keys, cursor untouched
+)
+
 type Run struct {
 	ID       int
 	JobID    int
@@ -169,7 +175,19 @@ type Run struct {
 	Duration time.Duration
 	Since    string // cursor the run started from; "" = full backlog
 	Error    string // the run itself failed (auth, Jira search…)
+	Kind     string // "", KindDryRun or KindRetry
 	Tickets  []Ticket
+}
+
+// FailedKeys are the Jira keys of the run's failed tickets, for Retry failed.
+func (r Run) FailedKeys() []string {
+	var keys []string
+	for _, t := range r.Tickets {
+		if t.Outcome == Failed && t.Key != "" {
+			keys = append(keys, t.Key)
+		}
+	}
+	return keys
 }
 
 func (r Run) Count(o Outcome) int {
@@ -199,6 +217,7 @@ type Connection struct {
 	JiraURL, JiraEmail, JiraToken string
 	JQLExtra                      string // ANDed into every search
 	JiraKeyField                  string // ADO field holding "KEY - id", the link between both sides
+	Rules                         Rules  // value mappings from the Mappings page
 }
 
 const DefaultJiraKeyField = "Custom.JiraID"
@@ -226,8 +245,18 @@ type Engine interface {
 	ValidatePAT(ctx context.Context, org, pat string) (string, error)
 	// CheckJira checks the Jira credentials and returns the account's display name.
 	CheckJira(ctx context.Context, conn Connection) (string, error)
-	// Sync runs one job; onProgress, if set, gets a snapshot after detection and after every issue, on the worker goroutine.
-	Sync(ctx context.Context, conn Connection, j Job, onProgress func(Progress)) Run
+	// Check lists what would make a sync of j fail before it writes anything (missing ADO paths, no Sprint field).
+	Check(ctx context.Context, conn Connection, j Job) (problems []string, err error)
+	Sync(ctx context.Context, conn Connection, j Job, opts RunOptions) Run
+}
+
+// RunOptions shape one Sync.
+type RunOptions struct {
+	// OnProgress gets a snapshot after detection and after every issue, on the worker goroutine.
+	OnProgress func(Progress)
+	DryRun     bool
+	// Keys limits the run to these Jira issues (Retry failed); the cursor is neither read nor moved.
+	Keys []string
 }
 
 // Progress is a snapshot of a run in flight.

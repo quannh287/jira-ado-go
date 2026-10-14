@@ -47,6 +47,7 @@ func inSprint(i *jira.Issue, state string) {
 }
 
 var idIn = regexp.MustCompile(`id in \(([^)]*)\)`)
+var keyIn = regexp.MustCompile(`key in \(([^)]*)\)`)
 var idEq = regexp.MustCompile(`^id = (\d+)`)
 
 func (f *fakeJira) Search(_ context.Context, jql string, _ []string) ([]jira.Issue, error) {
@@ -56,6 +57,17 @@ func (f *fakeJira) Search(_ context.Context, jql string, _ []string) ([]jira.Iss
 			return nil, errors.New("jira 500")
 		}
 		return f.byID(m[1]), nil
+	}
+	if m := keyIn.FindStringSubmatch(jql); m != nil {
+		var out []jira.Issue
+		for _, k := range strings.Split(m[1], ",") {
+			for _, i := range f.issues {
+				if `"`+i.Key+`"` == strings.TrimSpace(k) {
+					out = append(out, i)
+				}
+			}
+		}
+		return out, nil
 	}
 	if m := idIn.FindStringSubmatch(jql); m != nil {
 		var out []jira.Issue
@@ -101,6 +113,7 @@ type item struct {
 
 // fakeADO is an in-memory ADO that enforces the state rules the sync works around.
 type fakeADO struct {
+	missing       map[string]bool // classification paths that don't exist
 	panicOnCreate bool
 	items         map[int]*item
 	next          int
@@ -109,6 +122,10 @@ type fakeADO struct {
 
 func newFakeADO() *fakeADO {
 	return &fakeADO{items: map[int]*item{}, next: 100, keyFld: syncjob.DefaultJiraKeyField}
+}
+
+func (a *fakeADO) NodeExists(_ context.Context, _, path string) (bool, error) {
+	return !a.missing[path], nil
 }
 
 func (a *fakeADO) FindByField(_ context.Context, field, value string) (int, error) {
@@ -234,7 +251,7 @@ func setup() (*Engine, *fakeJira, *fakeADO, syncjob.State, syncjob.Job) {
 
 func TestFirstRunCreatesParentsThenSubtasks(t *testing.T) {
 	e, j, a, state, job := setup()
-	run := e.Sync(context.Background(), conn, job, nil)
+	run := e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
 	if run.Error != "" || run.Status() != syncjob.Success {
 		t.Fatalf("run error %q status %s tickets %+v", run.Error, run.Status(), run.Tickets)
 	}
@@ -269,7 +286,7 @@ func TestFirstRunCreatesParentsThenSubtasks(t *testing.T) {
 	}
 
 	// The next run only asks for issues updated since the cursor.
-	e.Sync(context.Background(), conn, job, nil)
+	e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
 	if !strings.HasPrefix(j.jqls[4], `updated >= "2026/10/14 09:00" AND project = "SE"`) {
 		t.Fatalf("second run JQLs %q", j.jqls)
 	}
@@ -277,7 +294,7 @@ func TestFirstRunCreatesParentsThenSubtasks(t *testing.T) {
 
 func TestExistingItemRules(t *testing.T) {
 	e, _, a, _, job := setup()
-	first := e.Sync(context.Background(), conn, job, nil)
+	first := e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
 	pbiID, taskID := first.Tickets[0].ADOID, first.Tickets[1].ADOID
 
 	a.items[pbiID].fields[syncjob.FieldState] = "Done"
@@ -285,7 +302,7 @@ func TestExistingItemRules(t *testing.T) {
 	a.items[taskID].fields[syncjob.FieldOriginalEstimate] = 5.0 // filled in ADO: must be kept
 	a.items[pbiID].fields[syncjob.FieldTitle] = "edited in ADO"
 
-	run := e.Sync(context.Background(), conn, job, nil)
+	run := e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
 	pbi, task := run.Tickets[0], run.Tickets[1]
 	if pbi.Outcome != syncjob.Skipped || a.items[pbiID].fields[syncjob.FieldTitle] != "edited in ADO" || len(a.items[pbiID].comments) != 1 {
 		t.Fatalf("Done item was overwritten: %+v %+v", pbi, a.items[pbiID])
@@ -306,7 +323,7 @@ func TestUserFilterAndBlindAssigneeSearch(t *testing.T) {
 	e, j, _, _, job := setup()
 	job.Filters.Assignees = "someone else"
 	j.assigneeBlind = true
-	run := e.Sync(context.Background(), conn, job, nil)
+	run := e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
 	if run.Count(syncjob.Skipped) != 2 {
 		t.Fatalf("assignee filter: %+v", run.Tickets)
 	}
@@ -317,7 +334,7 @@ func TestUserFilterAndBlindAssigneeSearch(t *testing.T) {
 	// Filter on with no names: the assignee must resolve through the user mapping.
 	e2, _, _, _, job2 := setup()
 	job2.Filters.Users = nil
-	if run := e2.Sync(context.Background(), conn, job2, nil); run.Count(syncjob.Skipped) != 2 {
+	if run := e2.Sync(context.Background(), conn, job2, syncjob.RunOptions{}); run.Count(syncjob.Skipped) != 2 {
 		t.Fatalf("unmapped assignees synced: %+v", run.Tickets)
 	}
 }
@@ -325,7 +342,7 @@ func TestUserFilterAndBlindAssigneeSearch(t *testing.T) {
 func TestFailedTicketMakesRunPartial(t *testing.T) {
 	e, j, _, state, job := setup()
 	j.failDetail = "11"
-	run := e.Sync(context.Background(), conn, job, nil)
+	run := e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
 	if run.Status() != syncjob.Partial || run.Tickets[1].Outcome != syncjob.Failed || run.Tickets[1].Error == "" {
 		t.Fatalf("run %s tickets %+v", run.Status(), run.Tickets)
 	}
@@ -338,16 +355,16 @@ func TestComments(t *testing.T) {
 	e, j, a, _, job := setup()
 	j.comments["SE-1"] = []jira.Comment{{ID: "c1", Author: &jira.User{DisplayName: "Ana"}, Updated: "u1",
 		Body: []byte(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hi"}]}]}`)}}
-	id := e.Sync(context.Background(), conn, job, nil).Tickets[0].ADOID
+	id := e.Sync(context.Background(), conn, job, syncjob.RunOptions{}).Tickets[0].ADOID
 	if got := a.items[id].comments[1]; got != "<div><p><strong>[Ana]:</strong></p><p>hi</p></div>" {
 		t.Fatalf("comment %q", got)
 	}
-	e.Sync(context.Background(), conn, job, nil) // unchanged: no duplicate
+	e.Sync(context.Background(), conn, job, syncjob.RunOptions{}) // unchanged: no duplicate
 	if len(a.items[id].comments) != 1 {
 		t.Fatalf("comment duplicated: %v", a.items[id].comments)
 	}
 	j.comments["SE-1"][0].Updated = "u2"
-	e.Sync(context.Background(), conn, job, nil)
+	e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
 	if got := a.items[id].comments[1]; !strings.Contains(got, "(edited)") || len(a.items[id].comments) != 1 {
 		t.Fatalf("edited comment not patched in place: %v", a.items[id].comments)
 	}
@@ -355,13 +372,13 @@ func TestComments(t *testing.T) {
 
 func TestSprintPlacement(t *testing.T) {
 	e, j, a, _, job := setup()
-	id := e.Sync(context.Background(), conn, job, nil).Tickets[0].ADOID
+	id := e.Sync(context.Background(), conn, job, syncjob.RunOptions{}).Tickets[0].ADOID
 	if a.items[id].fields["System.IterationPath"] != `Tickets\Weekly Sprint\Sprint 82` {
 		t.Fatalf("active sprint → %q", a.items[id].fields["System.IterationPath"])
 	}
 	// Taken out of the sprint in Jira (a future sprint counts as out): back to the backlog.
 	inSprint(&j.issues[0], "future")
-	e.Sync(context.Background(), conn, job, nil)
+	e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
 	if a.items[id].fields["System.IterationPath"] != `Tickets\Weekly Sprint` {
 		t.Fatalf("left the sprint → %q, want the backlog", a.items[id].fields["System.IterationPath"])
 	}
@@ -369,23 +386,23 @@ func TestSprintPlacement(t *testing.T) {
 	// Without a Sprint field nothing is written: everything would otherwise drop to the backlog.
 	e2, j2, a2, _, job2 := setup()
 	j2.noSprintField = true
-	run := e2.Sync(context.Background(), conn, job2, nil)
+	run := e2.Sync(context.Background(), conn, job2, syncjob.RunOptions{})
 	if run.Status() != syncjob.Error || len(a2.items) != 0 || !strings.Contains(run.Error, "Sprint field") {
 		t.Fatalf("run %+v items %d", run, len(a2.items))
 	}
 	// A fixed iteration doesn't need it.
 	job2.Filters.AutoPaths, job2.Filters.Iteration = false, `Tickets\Fixed`
-	if run := e2.Sync(context.Background(), conn, job2, nil); run.Error != "" || a2.items[run.Tickets[0].ADOID].fields["System.IterationPath"] != `Tickets\Fixed` {
+	if run := e2.Sync(context.Background(), conn, job2, syncjob.RunOptions{}); run.Error != "" || a2.items[run.Tickets[0].ADOID].fields["System.IterationPath"] != `Tickets\Fixed` {
 		t.Fatalf("fixed iteration run %+v", run)
 	}
 }
 
 func TestFirstRunDoesNotCommentDoneItems(t *testing.T) {
 	e, _, a, state, job := setup()
-	id := e.Sync(context.Background(), conn, job, nil).Tickets[0].ADOID
+	id := e.Sync(context.Background(), conn, job, syncjob.RunOptions{}).Tickets[0].ADOID
 	a.items[id].fields[syncjob.FieldState] = "Done"
 	state.SetCursor(context.Background(), job.ID, "") // as if this were the job's first run
-	run := e.Sync(context.Background(), conn, job, nil)
+	run := e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
 	if run.Tickets[0].Outcome != syncjob.Skipped || len(a.items[id].comments) != 0 || !strings.Contains(run.Tickets[0].Message, "first run") {
 		t.Fatalf("first run commented a Done item: %+v comments %v", run.Tickets[0], a.items[id].comments)
 	}
@@ -394,7 +411,7 @@ func TestFirstRunDoesNotCommentDoneItems(t *testing.T) {
 func TestPanicBecomesFailedRun(t *testing.T) {
 	e, _, a, _, job := setup()
 	a.panicOnCreate = true
-	run := e.Sync(context.Background(), conn, job, nil) // must not take the app down
+	run := e.Sync(context.Background(), conn, job, syncjob.RunOptions{}) // must not take the app down
 	if run.Status() != syncjob.Error || !strings.Contains(run.Error, "internal error in sync") || run.Duration < 0 {
 		t.Fatalf("run %+v", run)
 	}
@@ -403,7 +420,7 @@ func TestPanicBecomesFailedRun(t *testing.T) {
 func TestProgress(t *testing.T) {
 	e, _, _, _, job := setup()
 	var got []syncjob.Progress
-	run := e.Sync(context.Background(), conn, job, func(p syncjob.Progress) { got = append(got, p) })
+	run := e.Sync(context.Background(), conn, job, syncjob.RunOptions{OnProgress: func(p syncjob.Progress) { got = append(got, p) }})
 	if len(got) != 3 || got[0].Total != 2 || got[0].Done != 0 || got[2].Done != 2 || len(got[2].Run.Tickets) != 2 {
 		t.Fatalf("progress %+v", got)
 	}
@@ -413,18 +430,106 @@ func TestProgress(t *testing.T) {
 	}
 }
 
+func TestPreflightStopsBeforeWriting(t *testing.T) {
+	e, _, a, state, job := setup()
+	a.missing = map[string]bool{syncjob.DefaultAreaPath: true}
+	run := e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
+	if run.Status() != syncjob.Error || !strings.Contains(run.Error, "Area path") || !strings.Contains(run.Error, "Nothing was written") || len(a.items) != 0 {
+		t.Fatalf("run %+v items %d", run, len(a.items))
+	}
+	if cur, _ := state.Cursor(context.Background(), job.ID); cur != "" {
+		t.Fatalf("cursor moved to %q", cur)
+	}
+	problems, err := e.Check(context.Background(), conn, job)
+	if err != nil || len(problems) != 1 {
+		t.Fatalf("Check = %q, %v", problems, err)
+	}
+}
+
+func TestDryRunWritesNothing(t *testing.T) {
+	e, j, a, state, job := setup()
+	j.comments["SE-1"] = []jira.Comment{{ID: "c1", Author: &jira.User{DisplayName: "Ana"}, Updated: "u1"}}
+	j.issues[0].Fields.Attachment = []jira.Attachment{{Filename: "log.txt", Content: "https://x/att/1"}}
+	run := e.Sync(context.Background(), conn, job, syncjob.RunOptions{DryRun: true})
+	if run.Kind != syncjob.KindDryRun || run.Error != "" || run.Count(syncjob.Created) != 2 || len(a.items) != 0 {
+		t.Fatalf("dry run %+v, %d items written", run, len(a.items))
+	}
+	if cur, _ := state.Cursor(context.Background(), job.ID); cur != "" {
+		t.Fatalf("dry run moved the cursor to %q", cur)
+	}
+	if m, _ := state.CommentMappings(context.Background(), 0); len(m) != 0 {
+		t.Fatalf("dry run saved comment mappings %v", m)
+	}
+	var held int
+	for _, c := range run.Tickets[0].Calls {
+		if c.Response == notSent {
+			held++
+		}
+	}
+	// create + comment + remove attachments + attach
+	if held < 4 || !strings.HasPrefix(run.Tickets[0].Message, "Would create") {
+		t.Fatalf("held %d calls, message %q: %+v", held, run.Tickets[0].Message, run.Tickets[0].Calls)
+	}
+}
+
+func TestRetryOnlyGivenKeys(t *testing.T) {
+	e, j, a, state, job := setup()
+	run := e.Sync(context.Background(), conn, job, syncjob.RunOptions{Keys: []string{"SE-2"}})
+	if run.Kind != syncjob.KindRetry || len(run.Tickets) != 1 || run.Tickets[0].Key != "SE-2" || len(a.items) != 1 {
+		t.Fatalf("retry %+v", run)
+	}
+	if !strings.Contains(j.jqls[0], `key in ("SE-2")`) {
+		t.Fatalf("retry JQL %q", j.jqls[0])
+	}
+	if cur, _ := state.Cursor(context.Background(), job.ID); cur != "" {
+		t.Fatalf("retry moved the cursor to %q", cur)
+	}
+}
+
+func TestCancelled(t *testing.T) {
+	e, _, a, _, job := setup()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	run := e.Sync(ctx, conn, job, syncjob.RunOptions{})
+	if run.Error != "Cancelled" || len(a.items) != 0 {
+		t.Fatalf("run %+v items %d", run, len(a.items))
+	}
+}
+
+func TestCustomRules(t *testing.T) {
+	e, j, a, _, job := setup()
+	j.issues[0].Fields.IssueType.Name = "Bug"
+	j.issues[0].Fields.Status.Name = "QA"
+	j.issues[0].Fields.Priority.Name = "Blocker"
+	c := conn
+	c.Rules = syncjob.Rules{
+		Types:      map[string]string{"bug": "Bug"},
+		States:     map[string]string{"qa": "Verify Test"},
+		Priorities: map[string]string{"Blocker": "1"},
+	}
+	id := e.Sync(context.Background(), c, job, syncjob.RunOptions{}).Tickets[0].ADOID
+	it := a.items[id]
+	if it.typ != "Bug" || it.fields[syncjob.FieldState] != "Verify Test" || it.fields[syncjob.FieldPriority] != "1" {
+		t.Fatalf("rules not applied: %s %+v", it.typ, it.fields)
+	}
+	// Unmapped values fall back like the source: the type's first state, priority 4.
+	if got := c.Rules.OrDefault().State("Bug", "Weird"); got != "New" {
+		t.Fatalf("fallback state %q", got)
+	}
+}
+
 func TestDurationRecorded(t *testing.T) {
 	e, _, _, _, job := setup()
 	clock := t0
 	e.Now = func() time.Time { clock = clock.Add(time.Second); return clock }
-	if run := e.Sync(context.Background(), conn, job, nil); run.Duration <= 0 {
+	if run := e.Sync(context.Background(), conn, job, syncjob.RunOptions{}); run.Duration <= 0 {
 		t.Fatalf("duration %v", run.Duration)
 	}
 }
 
 func TestNotConfigured(t *testing.T) {
 	e, _, _, _, job := setup()
-	run := e.Sync(context.Background(), syncjob.Connection{ADOOrg: "org", PAT: "p"}, job, nil)
+	run := e.Sync(context.Background(), syncjob.Connection{ADOOrg: "org", PAT: "p"}, job, syncjob.RunOptions{})
 	if run.Status() != syncjob.Error || !strings.Contains(run.Error, "Jira URL") {
 		t.Fatalf("run %+v", run)
 	}

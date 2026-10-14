@@ -42,11 +42,23 @@ func (f *Fake) CheckJira(ctx context.Context, conn Connection) (string, error) {
 	return "Demo Jira User", f.wait(ctx)
 }
 
-func (f *Fake) Sync(ctx context.Context, _ Connection, j Job, onProgress func(Progress)) Run {
+func (f *Fake) Check(context.Context, Connection, Job) ([]string, error) { return nil, nil }
+
+func (f *Fake) Sync(ctx context.Context, _ Connection, j Job, opts RunOptions) Run {
+	onProgress := opts.OnProgress
 	start := f.Now()
 	run := Run{JobID: j.ID, Started: start}
+	switch {
+	case opts.DryRun:
+		run.Kind = KindDryRun
+	case len(opts.Keys) > 0:
+		run.Kind = KindRetry
+	}
 	area, iteration := j.Paths(start)
 	n := 3 + f.rnd.IntN(6)
+	if len(opts.Keys) > 0 {
+		n = len(opts.Keys)
+	}
 	report := func() {
 		if onProgress != nil {
 			onProgress(Progress{Run: run.Snapshot(), Done: len(run.Tickets), Total: n})
@@ -58,7 +70,11 @@ func (f *Fake) Sync(ctx context.Context, _ Connection, j Job, onProgress func(Pr
 			run.Error = err.Error()
 			break
 		}
-		run.Tickets = append(run.Tickets, f.ticket(j, i+1, area, iteration))
+		t := f.ticket(j, i+1, area, iteration)
+		if len(opts.Keys) > 0 {
+			t.Key = opts.Keys[i]
+		}
+		run.Tickets = append(run.Tickets, t)
 		report()
 	}
 	run.Duration = f.Now().Sub(start)

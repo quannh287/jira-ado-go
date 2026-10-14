@@ -12,13 +12,8 @@ import (
 	"jira-ado/internal/syncjob"
 )
 
-var (
-	priorities = map[string]string{"Highest": "1", "High": "2", "Medium": "3", "Low": "4", "Lowest": "4"}
-	statesPBI  = map[string]string{"To Do": "New", "In Progress": "In Progress", "In Review": "Verify Test", "Done": "Done"}
-	statesTask = map[string]string{"To Do": "To Do", "In Progress": "In Progress", "In Review": "Verify Test", "Done": "Done"}
-	// ADO is the source of truth for these once filled: the sync keeps them and comments the difference.
-	preserved = []string{syncjob.FieldOriginalEstimate, syncjob.FieldCompletedWork, "Microsoft.VSTS.Scheduling.DueDate", syncjob.FieldTargetDate}
-)
+// ADO is the source of truth for these once filled: the sync keeps them and comments the difference.
+var preserved = []string{syncjob.FieldOriginalEstimate, syncjob.FieldCompletedWork, "Microsoft.VSTS.Scheduling.DueDate", syncjob.FieldTargetDate}
 
 // fields is one issue's values, already transformed for ADO.
 type fields struct {
@@ -85,6 +80,9 @@ func (r *run) process(ctx context.Context, is jira.Issue) (t syncjob.Ticket) {
 			return t
 		}
 		t.Outcome, t.Message = syncjob.Updated, fmt.Sprintf("Updated ADO %s #%d", f.wiType, existing)
+		if r.dry {
+			t.Message = fmt.Sprintf("Would update ADO %s #%d", f.wiType, existing)
+		}
 	} else {
 		id, err := r.create(ctx, f)
 		if err != nil {
@@ -92,6 +90,9 @@ func (r *run) process(ctx context.Context, is jira.Issue) (t syncjob.Ticket) {
 		}
 		t.ADOID = id
 		t.Outcome, t.Message = syncjob.Created, fmt.Sprintf("Created ADO %s #%d", f.wiType, id)
+		if r.dry {
+			t.ADOID, t.Message = 0, "Would create a new ADO "+f.wiType
+		}
 	}
 
 	// Attachment and comment failures don't fail the ticket, as in the source; they show up as warnings.
@@ -116,22 +117,23 @@ func (r *run) detailJQL(id string) string {
 
 func (r *run) fieldsOf(d jira.Issue) fields {
 	jf := d.Fields
-	f := fields{wiType: typePBI, title: jf.Summary, description: adfToHTML(jf.Description), start: jf.Created, target: jf.DueDate,
-		priority: "4", key: d.Key + " - " + d.ID}
-	if it := jf.IssueType; it != nil && (strings.EqualFold(it.Name, "subtask") || strings.EqualFold(it.Name, "sub-task")) {
-		f.wiType = typeTask
+	f := fields{title: jf.Summary, description: adfToHTML(jf.Description), start: jf.Created, target: jf.DueDate, key: d.Key + " - " + d.ID}
+	typeName, subtask := "", false
+	if it := jf.IssueType; it != nil {
+		// Only the name counts as a sub-task here, as in the source; the subtask flag also covers Jira's other child types.
+		typeName, subtask = it.Name, strings.EqualFold(it.Name, "subtask") || strings.EqualFold(it.Name, "sub-task")
 	}
+	f.wiType = r.rules.WorkItemType(typeName, subtask)
+	priority, status := "", ""
 	if jf.Priority != nil {
-		f.priority = cmpOr(priorities[jf.Priority.Name], "4")
+		priority = jf.Priority.Name
 	}
-	status := ""
 	if jf.Status != nil {
 		status = jf.Status.Name
 	}
-	if f.wiType == typePBI {
-		f.state = cmpOr(statesPBI[status], "New")
-	} else {
-		f.state = cmpOr(statesTask[status], "To Do")
+	f.priority = r.rules.Priority(priority)
+	f.state = r.rules.State(f.wiType, status)
+	if syncjob.IsTask(f.wiType) {
 		f.originalEstimate, f.remaining, f.completed = hours(jf.AggregateTimeOriginalEstimate), hours(jf.AggregateTimeEstimate), hours(jf.AggregateTimeSpent)
 	}
 	f.area, f.iteration = r.job.Paths(r.e.Now())
@@ -161,7 +163,7 @@ func (r *run) ops(f fields) []ado.Op {
 		{syncjob.FieldCreatedBy, f.createdBy},
 		{syncjob.FieldAssignedTo, f.assignedTo},
 	}
-	if f.wiType == typePBI {
+	if !syncjob.IsTask(f.wiType) {
 		all = append(all, kv{syncjob.FieldTargetDate, f.target})
 	} else { // Tasks get no due date, as in the source
 		all = append(all, kv{syncjob.FieldOriginalEstimate, f.originalEstimate}, kv{syncjob.FieldRemainingWork, f.remaining}, kv{syncjob.FieldCompletedWork, f.completed})
@@ -183,7 +185,7 @@ func (r *run) ops(f fields) []ado.Op {
 // create makes the work item in its first state, then moves it: ADO refuses to create one directly in a later state.
 func (r *run) create(ctx context.Context, f fields) (int, error) {
 	initial := f
-	initial.state = initialState(f.wiType)
+	initial.state = syncjob.InitialState(f.wiType)
 	id, err := r.ado.Create(ctx, f.wiType, r.ops(initial))
 	if err != nil {
 		return 0, err
@@ -214,7 +216,7 @@ func (r *run) update(ctx context.Context, id int, f fields, d jira.Issue) (skipp
 	}
 	// Removed can only go back to the first state; jumping straight to a later one is a 400.
 	if state == "Removed" && f.state != "Removed" {
-		if err := r.ado.Update(ctx, id, []ado.Op{{Op: "add", Path: "/fields/" + syncjob.FieldState, Value: initialState(f.wiType)}}); err != nil {
+		if err := r.ado.Update(ctx, id, []ado.Op{{Op: "add", Path: "/fields/" + syncjob.FieldState, Value: syncjob.InitialState(f.wiType)}}); err != nil {
 			return false, err
 		}
 	}
@@ -263,6 +265,10 @@ func (r *run) syncAttachments(ctx context.Context, id int, atts []jira.Attachmen
 		warnings = append(warnings, "remove attachments: "+err.Error())
 	}
 	for _, a := range atts {
+		if r.dry { // no download either: the dry run only needs the names
+			_ = r.ado.Attach(ctx, id, a.Filename, nil)
+			continue
+		}
 		data, err := r.jira.Download(ctx, a.Content)
 		if err == nil {
 			err = r.ado.Attach(ctx, id, a.Filename, data)
@@ -283,7 +289,7 @@ func (r *run) syncComments(ctx context.Context, key string, id int) []string {
 	if len(comments) == 0 {
 		return nil
 	}
-	state := r.e.State
+	state := r.state
 	mapped, err := state.CommentMappings(ctx, id)
 	if err != nil {
 		return []string{"comment mappings: " + err.Error()}
@@ -325,13 +331,6 @@ func renderComment(c jira.Comment, edited bool) string {
 		marker = " <em>(edited)</em>"
 	}
 	return fmt.Sprintf("<div><p><strong>[%s]:</strong>%s</p>%s</div>", escape(author), marker, adfToHTML(c.Body))
-}
-
-func initialState(wiType string) string {
-	if wiType == typePBI {
-		return "New"
-	}
-	return "To Do"
 }
 
 // resolveEmail maps a Jira user (email or display name, case-insensitive) to its ADO email, or "".

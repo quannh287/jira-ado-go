@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -68,6 +69,9 @@ func (a *App) reportPage(c *ui.Context, jobID int) {
 						return
 					}
 					ui.Textf(c, "Run #%d", r.ID).Bold().Grow(1)
+					if r.Kind != "" {
+						pill(c, kindLabel(r.Kind), muted)
+					}
 					pill(c, string(r.Status()), status)
 				})
 				sub := r.Started.Format("Jan 2 15:04:05") + " · " + ago(r.Started, a.now())
@@ -114,12 +118,21 @@ func (a *App) runDetail(c *ui.Context, j *syncjob.Job, r syncjob.Run, p *syncjob
 						return
 					}
 					ui.Textf(c, "%s · Run #%d", j.Name, r.ID).FontSize(18).Bold()
+					if r.Kind != "" {
+						ui.Text(c, kindLabel(r.Kind)).FontSize(12).Bold().TextColor(t.Accent)
+					}
 					ui.Text(c, fmt.Sprintf("%s · took %s · %d tickets · %s", r.Started.Format("Mon Jan 2 15:04:05"), fmtDuration(r.Duration), len(r.Tickets), since)).
 						FontSize(12).TextColor(t.TextMuted)
 				})
-				if p != nil {
+				switch {
+				case p != nil:
+					ui.Button(c.Key("cancelrun"), "Cancel").TextColor(t.Danger).OnClick(func() { a.cancelRun(j.ID) })
 					ui.Spinner(c).Label("Syncing")
-				} else {
+				default:
+					if n := len(r.FailedKeys()); n > 0 && r.Kind != syncjob.KindDryRun && j.Status == syncjob.Active && !a.running[j.ID] {
+						ui.Button(c.Key("retry"), fmt.Sprintf("Retry %d Failed", n)).
+							Tooltip("Runs just these tickets again; the cursor isn't moved").OnClick(func() { a.retryFailed(r) })
+					}
 					pill(c, string(r.Status()), runStatusColor(t, r.Status()))
 				}
 			})
@@ -130,12 +143,20 @@ func (a *App) runDetail(c *ui.Context, j *syncjob.Job, r syncjob.Run, p *syncjob
 				}
 				ui.Progress(c, frac).Label("Sync progress")
 			}
+			if r.Kind == syncjob.KindDryRun {
+				ui.Text(c, "Dry run: nothing was written to ADO. Calls marked \"not sent\" are what a sync would send.").FontSize(12).
+					TextColor(t.Accent).Padding(8, 12).Radius(8).Background(t.Accent.Alpha(0.1))
+			}
 			if r.Error != "" {
 				ui.Text(c, r.Error).TextColor(t.Danger).Selectable().Padding(10, 12).Radius(8).Background(t.Danger.Alpha(0.1))
 			}
 			ui.Grid(c).Columns(4).Gap(12).Children(func() {
 				for _, o := range syncjob.Outcomes {
-					stat(c, string(o), fmt.Sprint(r.Count(o)), outcomeColor(t, o))
+					label := string(o)
+					if r.Kind == syncjob.KindDryRun && (o == syncjob.Created || o == syncjob.Updated) {
+						label = "would be " + label
+					}
+					stat(c, label, fmt.Sprint(r.Count(o)), outcomeColor(t, o))
 				}
 			})
 			ui.Text(c, "Tickets").Bold()
@@ -174,7 +195,8 @@ func (a *App) ticket(c *ui.Context, key string, j *syncjob.Job, tk syncjob.Ticke
 			ui.Column(c).Padding(4, 12, 12, 34).Gap(10).Children(func() {
 				a.ticketLinks(c, j, tk)
 				if tk.Message != "" {
-					ui.Text(c, strings.TrimSpace(tk.WorkItemType+" · "+tk.Message)).FontSize(12).TextColor(t.TextMuted).Selectable()
+					ui.Text(c, strings.Join(slices.DeleteFunc([]string{tk.WorkItemType, tk.Message}, func(s string) bool { return s == "" }), " · ")).
+						FontSize(12).TextColor(t.TextMuted).Selectable()
 				}
 				if tk.Error != "" {
 					ui.Text(c, firstLine(tk.Error)).TextColor(t.Danger).Selectable().MaxLines(3)
@@ -228,7 +250,11 @@ func (a *App) callList(c *ui.Context, key string, calls []syncjob.APICall) {
 						meta += fmt.Sprintf(" · %d retries", call.Retries)
 					}
 					ui.Text(c, meta).FontSize(11).TextColor(t.TextMuted).Shrink(0)
-					pill(c, fmt.Sprint(call.Status), color)
+					if call.Status == 0 && call.Error == "" { // held back by a dry run
+						pill(c, "not sent", t.TextMuted)
+					} else {
+						pill(c, fmt.Sprint(call.Status), color)
+					}
 				})
 				if call.Request == "" && call.Response == "" && call.Error == "" {
 					continue
@@ -298,4 +324,14 @@ func workItemURL(org, project string, id int) string {
 		return ""
 	}
 	return fmt.Sprintf("https://dev.azure.com/%s/%s/_workitems/edit/%d", url.PathEscape(org), url.PathEscape(project), id)
+}
+
+func kindLabel(kind string) string {
+	switch kind {
+	case syncjob.KindDryRun:
+		return "dry run"
+	case syncjob.KindRetry:
+		return "retry"
+	}
+	return kind
 }

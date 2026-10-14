@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -65,12 +66,14 @@ type App struct {
 	notice   string // toast to show on the next frame, set from async callbacks
 
 	settings  settingsForm
+	mappings  mappingsForm
 	palette   bool
 	collapsed bool
 	query     string
 	draft     draft
 	running   map[int]bool
 	live      map[int]syncjob.Progress // the run in flight per job, for the live report
+	cancels   map[int]context.CancelFunc
 	jobTab    int
 	opened    map[string]*bool
 	confirm   bool
@@ -91,6 +94,7 @@ func New(engine syncjob.Engine, store *syncjob.Store, secrets Keys, now func() t
 		Async:    func(work, done func()) { work(); done() },
 		Post:     func(fn func()) { fn() },
 		live:     map[int]syncjob.Progress{},
+		cancels:  map[int]context.CancelFunc{},
 		engine:   engine,
 		store:    store,
 		now:      now,
@@ -228,7 +232,7 @@ func (a *App) pages(c *ui.Context) {
 			a.logsPage(c)
 		case r.Match("/mappings"):
 			r.Title("Mappings")
-			comingSoon(c, "Mappings", "Reusable field and user mappings shared across jobs.")
+			a.mappingsPage(c)
 		case r.Match("/analytics"):
 			r.Title("Analytics")
 			comingSoon(c, "Analytics", "Sync volume and failure trends over time.")
@@ -241,18 +245,45 @@ func (a *App) pages(c *ui.Context) {
 	}).Grow(1).MinHeight(0)
 }
 
-func (a *App) syncNow(id int) {
+func (a *App) syncNow(id int) { a.startRun(id, syncjob.RunOptions{}) }
+
+// dryRun reads Jira and ADO like a sync but writes nothing; its report shows what a sync would send.
+func (a *App) dryRun(id int) { a.startRun(id, syncjob.RunOptions{DryRun: true}) }
+
+// retryFailed reruns only the failed tickets of r, without touching the cursor.
+func (a *App) retryFailed(r syncjob.Run) {
+	if keys := r.FailedKeys(); len(keys) > 0 {
+		a.startRun(r.JobID, syncjob.RunOptions{Keys: keys})
+	}
+}
+
+// cancelRun stops a job's run; it ends at the next issue, with the cursor at its last checkpoint.
+func (a *App) cancelRun(id int) {
+	if cancel := a.cancels[id]; cancel != nil {
+		cancel()
+		a.store.Log(id, "Cancel requested")
+	}
+}
+
+func (a *App) startRun(id int, opts syncjob.RunOptions) {
 	j := a.store.Job(id)
 	if j == nil || j.Status != syncjob.Active || a.running[id] {
 		return
 	}
 	conn := a.connection() // an incomplete one comes back as a failed run naming what's missing
+	kind := map[bool]string{true: "Dry run"}[opts.DryRun]
+	if len(opts.Keys) > 0 {
+		kind = fmt.Sprintf("Retry of %d failed tickets", len(opts.Keys))
+	}
+	label := cmp.Or(kind, "Sync")
 	a.running[id] = true
-	a.live[id] = syncjob.Progress{Run: syncjob.Run{JobID: id, Started: a.now()}}
-	a.store.Log(id, "Sync started")
-	job := *j // copied on the UI thread; the worker never touches App state
+	a.live[id] = syncjob.Progress{Run: syncjob.Run{JobID: id, Started: a.now(), Kind: map[bool]string{true: syncjob.KindDryRun}[opts.DryRun]}}
+	a.store.Log(id, label+" started")
+	job := a.effectiveJob(*j) // copied on the UI thread; the worker never touches App state
+	ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
+	a.cancels[id] = cancel
 	// Snapshots arrive on the worker; Post hands them to the UI thread, which redraws the live report.
-	onProgress := func(p syncjob.Progress) {
+	opts.OnProgress = func(p syncjob.Progress) {
 		a.Post(func() {
 			if a.running[id] { // a late snapshot after done must not resurrect the live run
 				a.live[id] = p
@@ -261,12 +292,12 @@ func (a *App) syncNow(id int) {
 	}
 	var run syncjob.Run
 	a.Async(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
 		defer cancel()
-		run = a.engine.Sync(ctx, conn, job, onProgress)
+		run = a.engine.Sync(ctx, conn, job, opts)
 	}, func() {
 		delete(a.running, id)
 		delete(a.live, id)
+		delete(a.cancels, id)
 		if a.store.Job(id) == nil {
 			return // deleted while syncing
 		}
@@ -279,16 +310,22 @@ func (a *App) syncNow(id int) {
 		if run.Error != "" {
 			summary = "failed: " + run.Error
 		}
-		a.store.Log(id, "Sync "+summary)
+		a.store.Log(id, label+" "+summary)
 		a.notice = job.Name + ": " + summary
 	})
+}
+
+// effectiveJob adds the shared user mapping after the job's own, so a job-specific entry wins.
+func (a *App) effectiveJob(j syncjob.Job) syncjob.Job {
+	j.Filters.Users = append(slices.Clone(j.Filters.Users), a.store.SharedUsers()...)
+	return j
 }
 
 // connection is a snapshot of Settings and secrets for one run.
 func (a *App) connection() syncjob.Connection {
 	s := a.store.Settings
 	return syncjob.Connection{ADOOrg: s[setADOOrg], PAT: a.pat, JiraURL: s[setJiraURL], JiraEmail: s[setJiraEmail],
-		JiraToken: a.jiraToken, JQLExtra: s[setJQLExtra], JiraKeyField: s[setJiraKeyField]}
+		JiraToken: a.jiraToken, JQLExtra: s[setJQLExtra], JiraKeyField: s[setJiraKeyField], Rules: a.store.Rules()}
 }
 
 func (a *App) logout() {

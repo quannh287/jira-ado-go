@@ -23,7 +23,7 @@ func Seed(s *Store, f *Fake, now time.Time) {
 		for k := 2 - i; k >= 0; k-- { // oldest first; the store keeps newest first
 			at := now.Add(-time.Duration(k*7+i*3+1) * time.Hour)
 			f.Now = func() time.Time { return at }
-			r := f.Sync(context.Background(), Connection{}, *s.Job(id), nil)
+			r := f.Sync(context.Background(), Connection{}, *s.Job(id), RunOptions{})
 			r.Duration = time.Duration(800+k*450) * time.Millisecond
 			s.AddRun(r)
 		}

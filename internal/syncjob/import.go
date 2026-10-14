@@ -54,8 +54,8 @@ func (s *Store) Import(ctx context.Context, im Import) error {
 		nextRun++
 		r.ID, r.JobID = nextRun, id
 		runs[i] = r
-		stmts = append(stmts, stmt(`INSERT INTO runs (id, job_id, started, duration_ms, since, error) VALUES (?, ?, ?, ?, ?, ?)`,
-			r.ID, r.JobID, r.Started.UnixMilli(), r.Duration.Milliseconds(), r.Since, r.Error))
+		stmts = append(stmts, stmt(`INSERT INTO runs (id, job_id, started, duration_ms, since, error, kind) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			r.ID, r.JobID, r.Started.UnixMilli(), r.Duration.Milliseconds(), r.Since, r.Error, r.Kind))
 		for _, t := range r.Tickets {
 			stmts = append(stmts, stmt(`INSERT INTO tickets (run_id, key, summary, outcome, error, calls, work_item_type, ado_id, message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				r.ID, t.Key, t.Summary, string(t.Outcome), t.Error, marshal(orEmpty(t.Calls)), t.WorkItemType, t.ADOID, t.Message))

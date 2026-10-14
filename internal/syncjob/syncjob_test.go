@@ -78,7 +78,7 @@ func TestFake(t *testing.T) {
 		t.Fatal("short PAT accepted")
 	}
 	j := Job{ID: 1, JiraKey: "SE", ADOProject: "kai", Mappings: SmartDefaults(), Filters: DefaultFilters()}
-	r := f.Sync(context.Background(), Connection{}, j, nil)
+	r := f.Sync(context.Background(), Connection{}, j, RunOptions{})
 	if len(r.Tickets) < 3 || r.JobID != 1 {
 		t.Fatalf("run = %+v", r)
 	}
@@ -105,7 +105,7 @@ func TestSQLiteRoundTrip(t *testing.T) {
 	Seed(s, NewFake(0, clock), t0)
 	keep := s.AddJob(Job{Name: "keep", JiraKey: "K", ADOProject: "p", Type: Webhook, Mappings: SmartDefaults(),
 		Filters: Filters{Users: []UserPair{{Jira: "a", ADOEmail: "a@x"}}}})
-	s.AddRun(NewFake(0, clock).Sync(context.Background(), Connection{}, *s.Job(keep), nil))
+	s.AddRun(NewFake(0, clock).Sync(context.Background(), Connection{}, *s.Job(keep), RunOptions{}))
 	s.SetStatus(keep, Paused)
 	s.DeleteJob(1)
 	s.DeleteRuns(s.Runs[len(s.Runs)-1].ID)
@@ -160,7 +160,7 @@ func TestMigrateLegacyDatabase(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, col := range []string{"runs DROP COLUMN since", "runs DROP COLUMN error", "tickets DROP COLUMN work_item_type", "tickets DROP COLUMN ado_id", "tickets DROP COLUMN message"} {
+	for _, col := range []string{"runs DROP COLUMN kind", "runs DROP COLUMN since", "runs DROP COLUMN error", "tickets DROP COLUMN work_item_type", "tickets DROP COLUMN ado_id", "tickets DROP COLUMN message"} {
 		if _, err := s.db.Execute(ctx, "ALTER TABLE "+col); err != nil {
 			t.Fatal(err)
 		}
@@ -232,5 +232,34 @@ func TestUpdateJobPersists(t *testing.T) {
 	got := r.Job(id)
 	if got.Name != "b" || len(got.Mappings) != 2 || got.Filters.SyncComments || got.JiraKey != "SE" {
 		t.Fatalf("after reopen: %+v", got)
+	}
+}
+
+func TestRulesAndSharedUsersPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "r.db")
+	s, _ := Open(path, clock)
+	if got := s.Rules().State(TypePBI, "In Review"); got != "Verify Test" {
+		t.Fatalf("default rules: %q", got)
+	}
+	r := s.Rules()
+	r.States["In Review"] = "Committed"
+	r.Types = map[string]string{"Bug": "Bug"}
+	s.SetRules(r)
+	s.SetSharedUsers([]UserPair{{Jira: "ana@x", ADOEmail: "ana@ado"}})
+	s.Close()
+	re, _ := Open(path, clock)
+	defer re.Close()
+	got := re.Rules()
+	if got.State(TypePBI, "in review") != "Committed" || got.WorkItemType("bug", false) != "Bug" || got.Priority("High") != "2" {
+		t.Fatalf("rules after reopen: %+v", got)
+	}
+	if u := re.SharedUsers(); len(u) != 1 || u[0].ADOEmail != "ana@ado" {
+		t.Fatalf("shared users %+v", u)
+	}
+	// Migration v3: the run kind survives a reopen.
+	id := re.AddJob(Job{Name: "x", JiraKey: "X"})
+	re.AddRun(Run{JobID: id, Kind: KindDryRun})
+	if re.Runs[0].Kind != KindDryRun {
+		t.Fatal("kind not kept in memory")
 	}
 }

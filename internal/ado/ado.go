@@ -104,6 +104,26 @@ func (c *Client) FindByField(ctx context.Context, field, value string) (int, err
 // wiqlEscape doubles single quotes so a Jira key can't break out of the WIQL string.
 func wiqlEscape(s string) string { return strings.ReplaceAll(s, "'", "''") }
 
+// NodeExists reports whether an area or iteration path exists. kind is "areas" or "iterations";
+// path starts with the project name, as in System.AreaPath ("Tickets\\KPL\\KAI").
+func (c *Client) NodeExists(ctx context.Context, kind, path string) (bool, error) {
+	parts := strings.Split(strings.Trim(path, `\`), `\`)
+	if len(parts) == 0 || !strings.EqualFold(parts[0], c.project) {
+		return false, nil // a path outside the project can't be used for its work items
+	}
+	rest := make([]string, 0, len(parts)-1)
+	for _, p := range parts[1:] {
+		rest = append(rest, url.PathEscape(p))
+	}
+	u := fmt.Sprintf("/wit/classificationnodes/%s/%s?$depth=0&api-version=%s", kind, strings.Join(rest, "/"), apiVersion)
+	_, err := c.h.Do(ctx, "GET", u, "", nil)
+	var se *httpx.StatusError
+	if errors.As(err, &se) && se.Status == 404 {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // Fields reads the given fields of a work item.
 func (c *Client) Fields(ctx context.Context, id int, fields []string) (map[string]any, error) {
 	var out struct {

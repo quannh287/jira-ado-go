@@ -41,7 +41,14 @@ func (a *App) jobPage(c *ui.Context, id int) {
 		} else {
 			ui.Button(c.Key("resume"), "Resume").OnClick(func() { a.store.SetStatus(id, syncjob.Active) })
 		}
-		ui.PrimaryButton(c.Key("syncnow"), "Sync Now").Disabled(running || j.Status != syncjob.Active).
+		if running {
+			ui.Button(c.Key("cancel"), "Cancel").TextColor(t.Danger).Tooltip("Stops after the current issue; the next sync resumes from the last checkpoint").
+				OnClick(func() { a.cancelRun(id) })
+			return
+		}
+		ui.Button(c.Key("dryrun"), "Dry Run").Disabled(j.Status != syncjob.Active).
+			Tooltip("Reads Jira and ADO, writes nothing: the report shows what a sync would send").OnClick(func() { a.dryRun(id) })
+		ui.PrimaryButton(c.Key("syncnow"), "Sync Now").Disabled(j.Status != syncjob.Active).
 			Tooltip("Only ACTIVE jobs can sync").OnClick(func() { a.syncNow(id) })
 	}, func() {
 		ui.Tabs(c.Key("tabs"), &a.jobTab, jobTabs...).Label("Job sections")

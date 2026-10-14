@@ -228,9 +228,9 @@ func TestEditJob(t *testing.T) {
 // progressEngine reports one snapshot mid-run.
 type progressEngine struct{ syncjob.Fake }
 
-func (e *progressEngine) Sync(ctx context.Context, conn syncjob.Connection, j syncjob.Job, onProgress func(syncjob.Progress)) syncjob.Run {
+func (e *progressEngine) Sync(ctx context.Context, conn syncjob.Connection, j syncjob.Job, opts syncjob.RunOptions) syncjob.Run {
 	run := syncjob.Run{JobID: j.ID, Started: time.Now(), Tickets: []syncjob.Ticket{{Key: "CAT-1", Summary: "first", Outcome: syncjob.Updated}}}
-	onProgress(syncjob.Progress{Run: run.Snapshot(), Done: 1, Total: 3})
+	opts.OnProgress(syncjob.Progress{Run: run.Snapshot(), Done: 1, Total: 3})
 	return run
 }
 
@@ -258,5 +258,101 @@ func TestLiveReport(t *testing.T) {
 	tt.Frame()
 	if q := a.router.Query("run"); q != fmt.Sprint(a.store.Runs[0].ID) || tt.HasText("Live") {
 		t.Fatalf("after the run: query %q texts %q", q, tt.Texts())
+	}
+}
+
+// recordingEngine keeps the options and job of each run and returns a run with one failed ticket.
+type recordingEngine struct {
+	syncjob.Fake
+	opts []syncjob.RunOptions
+	jobs []syncjob.Job
+	ctx  context.Context
+}
+
+func (e *recordingEngine) Sync(ctx context.Context, conn syncjob.Connection, j syncjob.Job, opts syncjob.RunOptions) syncjob.Run {
+	e.opts, e.jobs, e.ctx = append(e.opts, opts), append(e.jobs, j), ctx
+	run := syncjob.Run{JobID: j.ID, Started: time.Now(), Tickets: []syncjob.Ticket{{Key: "CAT-7", Outcome: syncjob.Failed, Error: "TF401320"}}}
+	if opts.DryRun {
+		run.Kind = syncjob.KindDryRun
+	} else if len(opts.Keys) > 0 {
+		run.Kind = syncjob.KindRetry
+	}
+	return run
+}
+
+func TestDryRunCancelAndRetry(t *testing.T) {
+	a, tt := newTestApp()
+	a.pat = "abcdefghijklmnopqrstuvwxyz0123456789"
+	a.router.Transition = ui.TransitionNone
+	eng := &recordingEngine{}
+	a.engine = eng
+	id := a.store.AddJob(syncjob.Job{Name: "CAT", JiraKey: "CAT", ADOProject: "Tickets", Filters: syncjob.DefaultFilters(),
+		Mappings: syncjob.SmartDefaults()})
+	a.store.SetSharedUsers([]syncjob.UserPair{{Jira: "ana@x", ADOEmail: "ana@ado"}})
+	a.router.Push(fmt.Sprintf("/jobs/%d", id))
+	tt.Frame()
+
+	must(t, tt.Click("Dry Run"))
+	if !eng.opts[0].DryRun || a.store.Runs[0].Kind != syncjob.KindDryRun {
+		t.Fatalf("dry run opts %+v run %+v", eng.opts[0], a.store.Runs[0])
+	}
+	// The shared user mapping reaches the engine after the job's own.
+	if u := eng.jobs[0].Filters.Users; len(u) != 1 || u[0].ADOEmail != "ana@ado" {
+		t.Fatalf("users sent to the engine %+v", u)
+	}
+	if _, ok := a.store.LastRun(id); ok {
+		t.Fatal("a dry run must not count as the job's last run")
+	}
+
+	// Retry is offered on a real run with failures, and reruns only those keys.
+	must(t, tt.Click("Sync Now"))
+	a.router.Push(fmt.Sprintf("/jobs/%d/report?run=%d", id, a.store.Runs[0].ID))
+	tt.Frame()
+	must(t, tt.Click("Retry 1 Failed"))
+	if keys := eng.opts[2].Keys; len(keys) != 1 || keys[0] != "CAT-7" || a.store.Runs[0].Kind != syncjob.KindRetry {
+		t.Fatalf("retry opts %+v", eng.opts[2])
+	}
+
+	// Cancel cancels the run's context.
+	var work, done func()
+	a.Async = func(w, d func()) { work, done = w, d }
+	a.router.Push(fmt.Sprintf("/jobs/%d", id))
+	tt.Frame()
+	must(t, tt.Click("Sync Now"))
+	tt.Frame()
+	must(t, tt.Click("Cancel"))
+	work()
+	if eng.ctx.Err() == nil {
+		t.Fatal("Cancel didn't cancel the run's context")
+	}
+	done()
+}
+
+func TestMappingsPage(t *testing.T) {
+	a, tt := newTestApp()
+	a.pat = "abcdefghijklmnopqrstuvwxyz0123456789"
+	a.router.Transition = ui.TransitionNone
+	a.store.AddJob(syncjob.Job{Name: "CAT", JiraKey: "CAT", Filters: syncjob.Filters{Users: []syncjob.UserPair{{Jira: "bo@x", ADOEmail: "bo@ado"}}}})
+	a.router.Push("/mappings")
+	tt.Frame()
+	if !tt.HasText("Mappings") || len(a.mappings.states) != 4 {
+		t.Fatalf("defaults not loaded: %+v", a.mappings)
+	}
+	must(t, tt.Click("Import from Jobs"))
+	a.mappings.types = append(a.mappings.types, pair{"Bug", "Bug"})
+	a.mappings.priorities = append(a.mappings.priorities, pair{"Blocker", "9"})
+	tt.Frame()
+	if a.mappings.mappingsError() == "" {
+		t.Fatal("priority 9 accepted")
+	}
+	a.mappings.priorities[len(a.mappings.priorities)-1].to = "1"
+	tt.Frame()
+	must(t, tt.Click("Save"))
+	r := a.store.Rules()
+	if r.WorkItemType("bug", false) != "Bug" || r.Priority("blocker") != "1" || len(a.store.SharedUsers()) != 1 {
+		t.Fatalf("saved rules %+v users %+v", r, a.store.SharedUsers())
+	}
+	if a.connection().Rules.Priority("Blocker") != "1" {
+		t.Fatal("the next sync wouldn't get the saved rules")
 	}
 }

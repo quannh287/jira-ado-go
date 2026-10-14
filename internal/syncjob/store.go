@@ -64,6 +64,8 @@ var migrations = [][]string{{
 		ado_work_item_id INTEGER NOT NULL, jira_comment_id TEXT NOT NULL,
 		ado_comment_id INTEGER NOT NULL, jira_updated TEXT NOT NULL,
 		PRIMARY KEY (ado_work_item_id, jira_comment_id))`,
+}, {
+	`ALTER TABLE runs ADD COLUMN kind TEXT NOT NULL DEFAULT ''`,
 }}
 
 // NewStore is an in-memory store, for tests and demos.
@@ -156,14 +158,14 @@ func (s *Store) load(ctx context.Context) error {
 		}
 	}
 
-	runs, err := s.db.Query(ctx, `SELECT id, job_id, started, duration_ms, since, error FROM runs ORDER BY id DESC`)
+	runs, err := s.db.Query(ctx, `SELECT id, job_id, started, duration_ms, since, error, kind FROM runs ORDER BY id DESC`)
 	if err != nil {
 		return err
 	}
 	runIdx := map[int]int{}
 	for _, r := range runs.Values {
 		run := Run{ID: toInt(r[0]), JobID: toInt(r[1]), Started: fromMillis(r[2]), Duration: time.Duration(toInt(r[3])) * time.Millisecond,
-			Since: r[4].(string), Error: r[5].(string)}
+			Since: r[4].(string), Error: r[5].(string), Kind: r[6].(string)}
 		runIdx[run.ID] = len(s.Runs)
 		s.Runs = append(s.Runs, run)
 		s.nextRun = max(s.nextRun, run.ID)
@@ -279,8 +281,8 @@ func (s *Store) AddRun(r Run) int {
 	s.nextRun++
 	r.ID = s.nextRun
 	s.Runs = slices.Insert(s.Runs, 0, r)
-	stmts := []sqlite.Statement{stmt(`INSERT INTO runs (id, job_id, started, duration_ms, since, error) VALUES (?, ?, ?, ?, ?, ?)`,
-		r.ID, r.JobID, r.Started.UnixMilli(), r.Duration.Milliseconds(), r.Since, r.Error)}
+	stmts := []sqlite.Statement{stmt(`INSERT INTO runs (id, job_id, started, duration_ms, since, error, kind) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		r.ID, r.JobID, r.Started.UnixMilli(), r.Duration.Milliseconds(), r.Since, r.Error, r.Kind)}
 	for _, t := range r.Tickets {
 		stmts = append(stmts, stmt(`INSERT INTO tickets (run_id, key, summary, outcome, error, calls, work_item_type, ado_id, message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			r.ID, t.Key, t.Summary, string(t.Outcome), t.Error, marshal(orEmpty(t.Calls)), t.WorkItemType, t.ADOID, t.Message))
@@ -317,9 +319,10 @@ func (s *Store) DeleteRuns(ids ...int) {
 	s.write(stmts...)
 }
 
+// LastRun is the job's newest run that really synced; dry runs don't count.
 func (s *Store) LastRun(jobID int) (Run, bool) {
 	for _, r := range s.Runs {
-		if r.JobID == jobID {
+		if r.JobID == jobID && r.Kind != KindDryRun {
 			return r, true
 		}
 	}
@@ -451,3 +454,27 @@ func firstWords(stmts []sqlite.Statement) string {
 	f := strings.Fields(stmts[0].SQL)
 	return strings.Join(f[:min(3, len(f))], " ")
 }
+
+// Settings stored as JSON, for structured config such as the Mappings page.
+const (
+	SettingRules       = "mapping_rules"
+	SettingSharedUsers = "shared_users"
+)
+
+// Rules are the saved value mappings, defaults filled in.
+func (s *Store) Rules() Rules {
+	var r Rules
+	_ = unmarshal(s.Settings[SettingRules], &r) // a missing or broken value means the defaults
+	return r.OrDefault()
+}
+
+func (s *Store) SetRules(r Rules) { s.SetSetting(SettingRules, marshal(r)) }
+
+// SharedUsers is the user mapping every job falls back to.
+func (s *Store) SharedUsers() []UserPair {
+	var u []UserPair
+	_ = unmarshal(s.Settings[SettingSharedUsers], &u)
+	return u
+}
+
+func (s *Store) SetSharedUsers(u []UserPair) { s.SetSetting(SettingSharedUsers, marshal(orEmpty(u))) }

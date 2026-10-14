@@ -4,6 +4,7 @@ package syncer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -25,6 +26,7 @@ type jiraAPI interface {
 }
 
 type adoAPI interface {
+	NodeExists(ctx context.Context, kind, path string) (bool, error)
 	FindByField(ctx context.Context, field, value string) (int, error)
 	Fields(ctx context.Context, id int, fields []string) (map[string]any, error)
 	Create(ctx context.Context, workItemType string, ops []ado.Op) (int, error)
@@ -65,11 +67,6 @@ func (e *Engine) CheckJira(ctx context.Context, conn syncjob.Connection) (string
 	return jira.New(strings.TrimRight(conn.JiraURL, "/"), conn.JiraEmail, conn.JiraToken).Myself(ctx)
 }
 
-const (
-	typePBI  = "Product Backlog Item"
-	typeTask = "Task"
-)
-
 // run is one sync's working state.
 type run struct {
 	e     *Engine
@@ -78,17 +75,26 @@ type run struct {
 	jira  jiraAPI
 	ado   adoAPI
 	calls *[]syncjob.APICall // the current ticket's ADO calls
+	state syncjob.State      // e.State, or a read-only view of it in a dry run
+	rules syncjob.Rules      // value mappings, defaults filled in
+	dry   bool
 	// firstRun has no cursor: it imports the whole backlog, so Done items are skipped without a comment each.
 	firstRun bool
 	// sprintField is Jira's Sprint custom field, read when iterations follow the Jira sprint.
 	sprintField string
 }
 
-func (e *Engine) Sync(ctx context.Context, conn syncjob.Connection, job syncjob.Job, onProgress func(syncjob.Progress)) (out syncjob.Run) {
+func (e *Engine) Sync(ctx context.Context, conn syncjob.Connection, job syncjob.Job, opts syncjob.RunOptions) (out syncjob.Run) {
 	start := e.Now()
 	out = syncjob.Run{JobID: job.ID, Started: start}
+	switch {
+	case opts.DryRun:
+		out.Kind = syncjob.KindDryRun
+	case len(opts.Keys) > 0:
+		out.Kind = syncjob.KindRetry
+	}
 	// run ties every log line of this sync together; the run's DB id isn't known until the UI saves it.
-	lg := slog.With("run", fmt.Sprintf("%d-%d", job.ID, start.Unix()), "job", job.ID, "jira", job.JiraKey, "ado", job.ADOProject)
+	lg := slog.With("run", fmt.Sprintf("%d-%d", job.ID, start.Unix()), "job", job.ID, "jira", job.JiraKey, "ado", job.ADOProject, "kind", out.Kind)
 	defer func() { // named result, so every return path, a panic included, gets the duration and a log line
 		if p := recover(); p != nil {
 			out.Error = applog.Recovered("sync", p, "job", job.ID).Error()
@@ -103,54 +109,49 @@ func (e *Engine) Sync(ctx context.Context, conn syncjob.Connection, job syncjob.
 		}
 	}()
 	lg.Info("sync start")
-	if m := conn.Missing(); m != "" {
-		out.Error = "Not configured: " + m + " (Settings)"
-		return out
-	}
-	conn.JiraKeyField = cmpOr(conn.JiraKeyField, syncjob.DefaultJiraKeyField)
-
-	r := &run{e: e, conn: conn, job: job}
-	r.jira, r.ado = e.clients(conn, job.ADOProject, func(c ado.Call) {
-		if r.calls != nil {
-			*r.calls = append(*r.calls, syncjob.APICall{Method: c.Method, URL: c.URL, Request: c.Request, Status: c.Status,
-				Response: c.Response, Retries: c.Retries, Duration: c.Duration, Error: c.Error})
-		}
-	})
-
-	since, err := e.State.Cursor(ctx, job.ID)
-	if err != nil {
-		out.Error = "read cursor: " + err.Error()
-		return out
-	}
-	out.Since = since
-	r.firstRun = since == ""
-	if job.Filters.AutoPaths {
-		// Without the Sprint field every issue would look out of sprint and be moved to the backlog, so stop instead.
-		if r.sprintField, err = r.jira.SprintField(ctx); err != nil || r.sprintField == "" {
-			out.Error = "Can't read Jira's Sprint field, so issues can't be placed by sprint"
-			if err != nil {
-				out.Error += ": " + err.Error()
-			}
-			return out
-		}
-	}
-	issues, err := r.detect(ctx, since)
+	r, err := e.newRun(conn, job, opts.DryRun)
 	if err != nil {
 		out.Error = err.Error()
+		return out
+	}
+
+	moveCursor := len(opts.Keys) == 0 && !opts.DryRun
+	since := ""
+	if len(opts.Keys) == 0 {
+		if since, err = r.state.Cursor(ctx, job.ID); err != nil {
+			out.Error = "read cursor: " + err.Error()
+			return out
+		}
+		r.firstRun = since == ""
+	}
+	out.Since = since
+	// Preflight: anything here would fail every ticket, so stop before a single write.
+	if problems, err := r.preflight(ctx); err != nil || len(problems) > 0 {
+		out.Error = stopReason(ctx, err, problems)
+		return out
+	}
+	var issues []jira.Issue
+	if len(opts.Keys) > 0 {
+		issues, err = r.byKeys(ctx, opts.Keys)
+	} else {
+		issues, err = r.detect(ctx, since)
+	}
+	if err != nil {
+		out.Error = stopReason(ctx, err, nil)
 		return out
 	}
 	lg.Info("issues detected", "count", len(issues), "since", since, "first_run", r.firstRun)
 
 	report := func() {
-		if onProgress != nil {
-			onProgress(syncjob.Progress{Run: out.Snapshot(), Done: len(out.Tickets), Total: len(issues)})
+		if opts.OnProgress != nil {
+			opts.OnProgress(syncjob.Progress{Run: out.Snapshot(), Done: len(out.Tickets), Total: len(issues)})
 		}
 	}
 	report()
 	cp := newCheckpoint(issues)
 	for _, is := range issues {
 		if ctx.Err() != nil {
-			out.Error = "stopped: " + ctx.Err().Error()
+			out.Error = stopReason(ctx, ctx.Err(), nil)
 			return out // cursor stays at the last checkpoint, so the next run resumes here
 		}
 		t := r.process(ctx, is)
@@ -162,19 +163,114 @@ func (e *Engine) Sync(ctx context.Context, conn syncjob.Connection, job syncjob.
 			lg.Warn("ticket synced with warnings", "key", t.Key, "ado_id", t.ADOID, "msg", t.Message)
 		}
 		// Checkpoint per issue; a failed issue still advances it on purpose — its ticket result is the record to rerun.
-		if iso := cp.advance(is.ID); iso != "" {
-			if err := e.State.SetCursor(ctx, job.ID, iso); err != nil {
+		if iso := cp.advance(is.ID); iso != "" && moveCursor {
+			if err := r.state.SetCursor(ctx, job.ID, iso); err != nil {
 				lg.Error("save checkpoint", "cursor", iso, "err", err)
 			}
 		}
 	}
 	// Only close the window when something was processed: a broken query returning 0 issues must not swallow the backlog.
-	if len(issues) > 0 {
-		if err := e.State.SetCursor(ctx, job.ID, start.UTC().Format(time.RFC3339Nano)); err != nil {
+	if len(issues) > 0 && moveCursor {
+		if err := r.state.SetCursor(ctx, job.ID, start.UTC().Format(time.RFC3339Nano)); err != nil {
 			lg.Error("save cursor", "err", err)
 		}
 	}
 	return out
+}
+
+// newRun builds the clients and state of one run; in a dry run the ADO writes and the state writes are only recorded.
+func (e *Engine) newRun(conn syncjob.Connection, job syncjob.Job, dry bool) (*run, error) {
+	if m := conn.Missing(); m != "" {
+		return nil, fmt.Errorf("Not configured: %s (Settings)", m)
+	}
+	conn.JiraKeyField = cmpOr(conn.JiraKeyField, syncjob.DefaultJiraKeyField)
+	r := &run{e: e, conn: conn, job: job, state: e.State, rules: conn.Rules.OrDefault(), dry: dry}
+	logCall := func(c ado.Call) {
+		if r.calls != nil {
+			*r.calls = append(*r.calls, syncjob.APICall{Method: c.Method, URL: c.URL, Request: c.Request, Status: c.Status,
+				Response: c.Response, Retries: c.Retries, Duration: c.Duration, Error: c.Error})
+		}
+	}
+	r.jira, r.ado = e.clients(conn, job.ADOProject, logCall)
+	if dry {
+		r.ado = &dryADO{adoAPI: r.ado, log: logCall}
+		r.state = readOnlyState{e.State}
+	}
+	return r, nil
+}
+
+// Check is the preflight on its own, for the job editor.
+func (e *Engine) Check(ctx context.Context, conn syncjob.Connection, job syncjob.Job) ([]string, error) {
+	r, err := e.newRun(conn, job, true)
+	if err != nil {
+		return nil, err
+	}
+	return r.preflight(ctx)
+}
+
+// preflight lists what would fail every ticket: a missing area or iteration path, or no Sprint field to place issues by.
+func (r *run) preflight(ctx context.Context) ([]string, error) {
+	var problems []string
+	f := r.job.Filters
+	area, iteration := r.job.Paths(r.e.Now())
+	paths := [][2]string{{"areas", area}}
+	if f.AutoPaths {
+		paths = append(paths, [2]string{"iterations", iteration}, [2]string{"iterations", r.job.BacklogPath()})
+		// Without the Sprint field every issue would look out of sprint and be moved to the backlog.
+		field, err := r.jira.SprintField(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if field == "" {
+			problems = append(problems, "Jira has no Sprint field this account can read, so issues can't be placed by sprint")
+		}
+		r.sprintField = field
+	} else {
+		paths = append(paths, [2]string{"iterations", iteration})
+	}
+	for _, p := range paths {
+		if strings.TrimSpace(p[1]) == "" {
+			problems = append(problems, "No "+strings.TrimSuffix(p[0], "s")+" path set")
+			continue
+		}
+		ok, err := r.ado.NodeExists(ctx, p[0], p[1])
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			problems = append(problems, fmt.Sprintf("%s path %q doesn't exist in ADO project %s", map[string]string{"areas": "Area", "iterations": "Iteration"}[p[0]], p[1], r.job.ADOProject))
+		}
+	}
+	return problems, nil
+}
+
+// stopReason says why a run stopped: cancelled, timed out, preflight problems, or the error.
+func stopReason(ctx context.Context, err error, problems []string) string {
+	switch {
+	case errors.Is(ctx.Err(), context.Canceled):
+		return "Cancelled"
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return "Stopped: the run took longer than its time limit"
+	case len(problems) > 0:
+		return "Preflight: " + strings.Join(problems, "; ") + ". Nothing was written."
+	case err != nil:
+		return err.Error()
+	}
+	return ""
+}
+
+// byKeys fetches just the given issues, for Retry failed.
+func (r *run) byKeys(ctx context.Context, keys []string) ([]jira.Issue, error) {
+	q := make([]string, len(keys))
+	for i, k := range keys {
+		q[i] = jqlQuote(k)
+	}
+	issues, err := r.jira.Search(ctx, "key in ("+strings.Join(q, ",")+") AND project = "+jqlQuote(r.job.JiraKey), searchFields)
+	if err != nil {
+		return nil, err
+	}
+	slices.SortStableFunc(issues, func(a, b jira.Issue) int { return boolInt(isSubtask(a)) - boolInt(isSubtask(b)) })
+	return issues, nil
 }
 
 // detect lists the issues to process: updated since the cursor, plus sub-tasks of those parents, parents first.

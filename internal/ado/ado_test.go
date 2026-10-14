@@ -77,3 +77,35 @@ func TestConnectionData(t *testing.T) {
 	}
 	Host = "https://dev.azure.com"
 }
+
+func TestNodeExists(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.EscapedPath())
+		if strings.Contains(r.URL.Path, "Missing") {
+			w.WriteHeader(404)
+			return
+		}
+		io.WriteString(w, `{"id":1}`)
+	}))
+	defer srv.Close()
+	c := NewWith(httpx.New(srv.URL, "x"), "org", "Tickets")
+	for _, tc := range []struct {
+		kind, path string
+		want       bool
+	}{
+		{"areas", `Tickets\KPL\KAI`, true},
+		{"iterations", `Tickets\Weekly Sprint\Sprint 82`, true},
+		{"iterations", `Tickets`, true},
+		{"areas", `Tickets\Missing`, false},
+		{"areas", `Other\KAI`, false}, // another project: no request at all
+	} {
+		got, err := c.NodeExists(context.Background(), tc.kind, tc.path)
+		if err != nil || got != tc.want {
+			t.Errorf("%s %s = %v, %v; want %v", tc.kind, tc.path, got, err, tc.want)
+		}
+	}
+	if len(paths) != 4 || paths[1] != "/wit/classificationnodes/iterations/Weekly%20Sprint/Sprint%2082" {
+		t.Fatalf("requests %q", paths)
+	}
+}
