@@ -19,7 +19,7 @@ func (a *App) jobPage(c *ui.Context, id int) {
 		return
 	}
 	running := a.running[id]
-	sub := fmt.Sprintf("%s → %s · %s", j.JiraKey, j.ADOProject, j.Type)
+	sub := fmt.Sprintf("%s → %s · %s", j.JiraKey, j.ADOProject, syncTypeLabel(*j))
 	page(c, j.Name, sub, func() {
 		if running {
 			ui.Spinner(c).Label("Syncing")

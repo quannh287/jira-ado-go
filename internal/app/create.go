@@ -235,7 +235,38 @@ func (a *App) stepBasic(c *ui.Context) {
 			syncjob.Scheduler: "Runs on a schedule.",
 			syncjob.Webhook:   "Runs when Jira sends an issue event.",
 		}[j.Type])
+		if j.Type == syncjob.Scheduler {
+			ui.Field(c, "Run every", func() {
+				every := fmtEvery(j.Filters.Every())
+				ui.Select(c.Key("every"), &every, everyLabels).Label("Run every").OnChange(func() {
+					if k := slices.Index(everyLabels, every); k >= 0 {
+						j.Filters.EveryMinutes = everyMinutes[k]
+					}
+				})
+			}).Description("Counted from the last run, while the app is open (also in the background).")
+		}
 	})
+}
+
+var (
+	everyMinutes = []int{15, 30, 60, 180, 360, 720, 1440}
+	everyLabels  = []string{"15 minutes", "30 minutes", "1 hour", "3 hours", "6 hours", "12 hours", "24 hours"}
+)
+
+// fmtEvery labels an interval as the Run every select does, or in plain minutes when it's not one of its options.
+func fmtEvery(d time.Duration) string {
+	if k := slices.Index(everyMinutes, int(d.Minutes())); k >= 0 {
+		return everyLabels[k]
+	}
+	return fmt.Sprintf("%d minutes", int(d.Minutes()))
+}
+
+// syncTypeLabel is the job's sync type, with the interval for Scheduler jobs.
+func syncTypeLabel(j syncjob.Job) string {
+	if j.Type == syncjob.Scheduler {
+		return "Scheduler · every " + fmtEvery(j.Filters.Every())
+	}
+	return string(j.Type)
 }
 
 func (a *App) stepMapping(c *ui.Context) {
@@ -359,7 +390,7 @@ func jobDetails(c *ui.Context, j syncjob.Job, now time.Time) {
 			kv(c, "Jira project", j.JiraKey)
 			kv(c, "ADO project", j.ADOProject)
 			kv(c, "Direction", "Jira → ADO")
-			kv(c, "Sync type", string(j.Type))
+			kv(c, "Sync type", syncTypeLabel(j))
 		})
 		ui.Fieldset(c, "Field mapping", func() {
 			for _, m := range j.Mappings {

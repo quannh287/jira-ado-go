@@ -324,6 +324,30 @@ func (a *App) startRun(id int, opts syncjob.RunOptions) {
 // Running is the number of runs in flight, asked before quitting.
 func (a *App) Running() int { return len(a.running) }
 
+// Tick starts every active Scheduler job whose interval has passed since its last run (or its creation); main calls it each minute.
+func (a *App) Tick() {
+	if a.pat == "" {
+		return // signed out: every run would fail on the missing PAT
+	}
+	now := a.now()
+	var due []int
+	for _, j := range a.store.Jobs {
+		if j.Type != syncjob.Scheduler || j.Status != syncjob.Active || a.running[j.ID] {
+			continue
+		}
+		last := j.Created
+		if r, ok := a.store.LastRun(j.ID); ok {
+			last = r.Started
+		}
+		if now.Sub(last) >= j.Filters.Every() {
+			due = append(due, j.ID)
+		}
+	}
+	for _, id := range due {
+		a.syncNow(id)
+	}
+}
+
 // effectiveJob adds the shared user mapping after the job's own, so a job-specific entry wins.
 func (a *App) effectiveJob(j syncjob.Job) syncjob.Job {
 	j.Filters.Users = append(slices.Clone(j.Filters.Users), a.store.SharedUsers()...)

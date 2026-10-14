@@ -47,6 +47,17 @@ type Filters struct {
 	SprintRoot   string
 	AnchorSprint int
 	AnchorDate   string // yyyy-mm-dd, UTC start of AnchorSprint
+	EveryMinutes int    // Scheduler jobs: minutes between runs; 0 = DefaultEvery
+}
+
+const DefaultEvery = time.Hour
+
+// Every is how long a Scheduler job waits after its last run before the next one.
+func (f Filters) Every() time.Duration {
+	if f.EveryMinutes <= 0 {
+		return DefaultEvery
+	}
+	return time.Duration(f.EveryMinutes) * time.Minute
 }
 
 // Defaults of the source app (domain/entities/SyncJob.ts DEFAULT_ADO_CONFIG).

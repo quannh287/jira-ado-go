@@ -3,6 +3,7 @@ package app
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"jira-ado/internal/syncjob"
 )
@@ -75,5 +76,39 @@ func TestFailuresOnlySkipsCleanRuns(t *testing.T) {
 	a.notifyRun(syncjob.Job{ID: 1, Name: "CAT"}, syncjob.Run{ID: 3, Error: "Preflight: Area path missing"})
 	if len(n.sent) != 1 || n.sent[0].subtitle != "Sync failed" || n.sent[0].body != "Preflight: Area path missing" {
 		t.Fatalf("failed run: %+v", n.sent)
+	}
+}
+
+func TestSchedulerTick(t *testing.T) {
+	a, _ := newTestApp()
+	clock := time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC)
+	a.now = func() time.Time { return clock }
+	eng := &recordingEngine{}
+	a.engine = eng
+	f := syncjob.DefaultFilters()
+	f.EveryMinutes = 15
+	id := a.store.AddJob(syncjob.Job{Name: "S", JiraKey: "S", Type: syncjob.Scheduler, Filters: f})
+	a.store.AddJob(syncjob.Job{Name: "M", JiraKey: "M", Filters: f}) // Manual: never scheduled
+
+	a.Tick()
+	if len(eng.jobs) != 0 {
+		t.Fatalf("signed out: runs %d", len(eng.jobs))
+	}
+	a.pat = "pat"
+	a.store.Jobs[0].Created = clock.Add(-10 * time.Minute)
+	a.Tick()
+	if len(eng.jobs) != 0 {
+		t.Fatal("ran before its interval")
+	}
+	clock = clock.Add(5 * time.Minute)
+	a.Tick()
+	if len(eng.jobs) != 1 || eng.jobs[0].ID != id {
+		t.Fatalf("runs %d", len(eng.jobs))
+	}
+	a.store.Runs[0].Started = clock
+	clock = clock.Add(14 * time.Minute)
+	a.Tick()
+	if len(eng.jobs) != 1 {
+		t.Fatal("ran again before 15 minutes since the last run")
 	}
 }

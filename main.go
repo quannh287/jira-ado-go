@@ -135,6 +135,13 @@ func main() {
 		appicon.SetIcon = mygo.App.Dock.SetIcon
 		appicon.Apply(store.Settings[appicon.SettingKey])
 		a.Post = win.Update
+		// Scheduler jobs: overdue ones start now, the rest when their interval passes.
+		win.Update(a.Tick)
+		go func() {
+			for range time.Tick(time.Minute) {
+				win.Update(a.Tick)
+			}
+		}()
 		if pending != "" {
 			slog.Info("notification opened at launch", "id", pending, "page", a.OpenNotification(pending))
 		}
