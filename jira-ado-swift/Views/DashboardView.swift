@@ -66,7 +66,7 @@ struct JobsTable: View {
                 } description: {
                     Text("⌘N  New Sync Job\n⌘K  Search")
                 } actions: {
-                    Button("New Sync Job") { model.path.append(.create) }
+                    Button("New Sync Job", systemImage: "plus") { model.path.append(.create) }
                         .accessibilityIdentifier("empty.newJob")
                 }
             }

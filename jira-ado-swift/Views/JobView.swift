@@ -61,7 +61,7 @@ struct JobView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Delete job").bold()
                     Text("Deletes the job and its sync history. Work items already in ADO stay.").font(.callout).foregroundStyle(.secondary)
-                    Button("Delete Job…", role: .destructive) { confirmDelete = true }
+                    Button("Delete Job…", systemImage: "trash", role: .destructive) { confirmDelete = true }
                 }
                 Spacer()
             }
@@ -90,24 +90,25 @@ struct JobView: View {
             } else {
                 Pill(j.status.rawValue, j.status.color)
             }
-            Button("Edit Job") { model.path.append(.edit(id, step: 0)) }
-            Button("View Report") {
+            IconButton("Edit Job", systemImage: "pencil") { model.path.append(.edit(id, step: 0)) }
+            IconButton("View Report", systemImage: "doc.text.magnifyingglass") {
                 model.path.append(.report(id, runID: running ? nil : model.store.lastRun(id)?.id))
             }
             .disabled(!running && model.store.lastRun(id) == nil)
             if j.status == .active {
-                Button("Pause") { model.store.setStatus(id, .paused) }.disabled(running)
+                IconButton("Pause", systemImage: "pause.circle") { model.store.setStatus(id, .paused) }.disabled(running)
             } else {
-                Button("Resume") { model.store.setStatus(id, .active) }
+                IconButton("Resume", systemImage: "play.circle") { model.store.setStatus(id, .active) }
             }
             if running {
-                Button("Cancel", role: .destructive) { model.cancelRun(id) }
-                    .help("Stops after the current issue; the next sync resumes from the last checkpoint")
+                IconButton("Cancel", systemImage: "stop.circle", role: .destructive,
+                           help: "Stops after the current issue; the next sync resumes from the last checkpoint") { model.cancelRun(id) }
             } else {
-                Button("Dry Run") { model.dryRun(id) }
+                IconButton("Dry Run", systemImage: "eye",
+                           help: "Dry Run: reads Jira and ADO, writes nothing; the report shows what a sync would send") { model.dryRun(id) }
                     .disabled(j.status != .active)
-                    .help("Reads Jira and ADO, writes nothing: the report shows what a sync would send")
-                Button("Sync Now") { model.syncNow(id) }
+                Button("Sync Now", systemImage: "arrow.triangle.2.circlepath") { model.syncNow(id) }
+                    .labelStyle(.titleAndIcon)
                     .buttonStyle(.borderedProminent)
                     .disabled(j.status != .active)
                     .help("Only ACTIVE jobs can sync")
@@ -120,7 +121,7 @@ struct JobView: View {
         HStack {
             Text(hint).font(.callout).foregroundStyle(.secondary)
             Spacer()
-            Button("Edit…") { model.path.append(.edit(id, step: step)) }
+            IconButton("Edit…", systemImage: "pencil") { model.path.append(.edit(id, step: step)) }
         }
     }
 }
@@ -189,7 +190,8 @@ struct RunsTable: View {
         TableColumn("Duration") { r in Text(fmtDuration(r.duration)).foregroundStyle(.secondary) }.width(70)
         if manage {
             TableColumn("") { r in
-                Button("Delete") { model.store.deleteRuns([r.id]) }.buttonStyle(.borderless).foregroundStyle(.red)
+                IconButton("Delete", systemImage: "trash", role: .destructive) { model.store.deleteRuns([r.id]) }
+                    .buttonStyle(.borderless)
             }
             .width(60)
         }

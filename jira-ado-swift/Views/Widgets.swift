@@ -1,5 +1,28 @@
 import SwiftUI
 
+/// A button showing only its SF Symbol; the title stays its tooltip (unless help says more) and its accessibility label.
+struct IconButton: View {
+    let title: String
+    let systemImage: String
+    var role: ButtonRole?
+    var help: String?
+    let action: () -> Void
+
+    init(_ title: String, systemImage: String, role: ButtonRole? = nil, help: String? = nil, action: @escaping () -> Void) {
+        self.title = title
+        self.systemImage = systemImage
+        self.role = role
+        self.help = help
+        self.action = action
+    }
+
+    var body: some View {
+        Button(role: role, action: action) { Label(title, systemImage: systemImage) }
+            .labelStyle(.iconOnly)
+            .help(help ?? title)
+    }
+}
+
 /// A coloured capsule label: statuses, outcomes, kinds.
 struct Pill: View {
     let text: String

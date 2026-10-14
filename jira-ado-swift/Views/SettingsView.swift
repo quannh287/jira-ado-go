@@ -49,7 +49,7 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 LabeledContent("Test") {
-                    Button("Send Test Notification") {
+                    Button("Send Test Notification", systemImage: "bell") {
                         model.notifier.notify(id: AppModel.testNotificationID, title: "jira-ado", subtitle: "Notifications work",
                                               body: "Click to come back to Settings. Run notifications open their report.")
                     }
@@ -79,8 +79,8 @@ struct SettingsView: View {
                         Text(AppLog.path).font(.caption.monospaced()).textSelection(.enabled).lineLimit(1).truncationMode(.middle)
                     }
                     HStack {
-                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: AppLog.path)]) }
-                        Button("Copy Path") {
+                        IconButton("Show in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: AppLog.path)]) }
+                        IconButton("Copy Path", systemImage: "doc.on.doc") {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(AppLog.path, forType: .string)
                         }

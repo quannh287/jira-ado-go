@@ -125,7 +125,8 @@ struct JobEditorView: View {
                         ForEach(Field.supported, id: \.self) { Text($0.label).tag($0) }
                     }
                     .labelsHidden()
-                    Button("Remove") { job.mappings.remove(at: i) }
+                    IconButton("Remove", systemImage: "minus.circle", role: .destructive) { job.mappings.remove(at: i) }
+                        .buttonStyle(.borderless)
                 }
             }
             if job.mappings.isEmpty {
@@ -138,11 +139,11 @@ struct JobEditorView: View {
                     Text("Only mapped ADO fields are written; title, area, iteration and the Jira key always are.").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Smart Defaults (\(Field.supported.count))") {
+                Button("Smart Defaults (\(Field.supported.count))", systemImage: "wand.and.stars") {
                     for p in Field.supported where !job.mappings.contains(where: { $0.ado == p.ado }) { job.mappings.append(p) }
                 }
                 .help("Every field the sync can write")
-                Button("Add Pair") { if let p = unmappedPair { job.mappings.append(p) } }.disabled(unmappedPair == nil)
+                Button("Add Pair", systemImage: "plus") { if let p = unmappedPair { job.mappings.append(p) } }.disabled(unmappedPair == nil)
             }
         }
     }
@@ -184,7 +185,8 @@ struct JobEditorView: View {
                     TextField("Jira user", text: $job.filters.users[i].jira, prompt: Text("Jira email or name")).labelsHidden()
                     Text("→").foregroundStyle(.secondary)
                     TextField("ADO email", text: $job.filters.users[i].adoEmail, prompt: Text("name@company.com")).labelsHidden()
-                    Button("Remove") { job.filters.users.remove(at: i) }
+                    IconButton("Remove", systemImage: "minus.circle", role: .destructive) { job.filters.users.remove(at: i) }
+                        .buttonStyle(.borderless)
                 }
             }
         } header: {
@@ -194,7 +196,7 @@ struct JobEditorView: View {
                     Text("Jira user (email or display name) → ADO email, for Assigned To and Created By.").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Add User") { job.filters.users.append(UserPair()) }
+                Button("Add User", systemImage: "plus") { job.filters.users.append(UserPair()) }
             }
         }
     }
@@ -203,7 +205,7 @@ struct JobEditorView: View {
     private var checkRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Button("Check in ADO", action: check)
+                Button("Check in ADO", systemImage: "checkmark.seal", action: check)
                     .disabled(checking)
                     .help("Looks up the area and iteration paths in ADO and the Sprint field in Jira")
                 if checking {

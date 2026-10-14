@@ -97,12 +97,13 @@ struct MappingsView: View {
                         TextField("Jira user", text: $form.users[i].jira, prompt: Text("Jira email or name")).labelsHidden()
                         Text("→").foregroundStyle(.secondary)
                         TextField("ADO email", text: $form.users[i].adoEmail, prompt: Text("name@company.com")).labelsHidden()
-                        Button("Remove") { form.users.remove(at: i) }
+                        IconButton("Remove", systemImage: "minus.circle", role: .destructive) { form.users.remove(at: i) }
+                            .buttonStyle(.borderless)
                     }
                 }
                 HStack {
-                    Button("Add User") { form.users.append(UserPair()) }
-                    Button("Import from Jobs") { model.show("Imported \(form.importUsers(from: model.store.jobs)) users; Save to keep them") }
+                    Button("Add User", systemImage: "plus") { form.users.append(UserPair()) }
+                    Button("Import from Jobs", systemImage: "person.2") { model.show("Imported \(form.importUsers(from: model.store.jobs)) users; Save to keep them") }
                         .help("Adds every job's user mapping that isn't here yet")
                 }
             } header: {
@@ -132,12 +133,12 @@ struct MappingsView: View {
             HStack {
                 if let err { Text(err).font(.callout).foregroundStyle(.red).lineLimit(2) }
                 Spacer()
-                Button("Refresh Options") { Task { await model.loadCatalog() } }
+                IconButton("Refresh Options", systemImage: "arrow.clockwise",
+                           help: "Refresh Options: reload Jira statuses, issue types and priorities, and ADO types and states") { Task { await model.loadCatalog() } }
                     .disabled(model.catalog.loading)
-                    .help("Reload Jira statuses, issue types and priorities, and ADO types and states")
-                Button("Reset Rules to Defaults") { form = MappingsForm(rules: .defaults, users: form.users) }
-                    .help("The source app's rules; shared users stay")
-                Button("Revert", action: load)
+                IconButton("Reset Rules to Defaults", systemImage: "arrow.counterclockwise",
+                           help: "Reset Rules to Defaults: the source app's rules; shared users stay") { form = MappingsForm(rules: .defaults, users: form.users) }
+                IconButton("Revert", systemImage: "arrow.uturn.backward", help: "Revert: discard unsaved changes", action: load)
                 Button("Save", action: save).buttonStyle(.borderedProminent).disabled(err != nil)
             }
             .padding(12)
@@ -181,10 +182,11 @@ private struct PairRows: View {
                 ChoiceField(label: fromHint, value: $rows[i].from, options: from, hint: fromHint).labelsHidden()
                 Text("→").foregroundStyle(.secondary)
                 ChoiceField(label: toHint, value: $rows[i].to, options: to, hint: toHint).labelsHidden()
-                Button("Remove") { rows.remove(at: i) }
+                IconButton("Remove", systemImage: "minus.circle", role: .destructive) { rows.remove(at: i) }
+                    .buttonStyle(.borderless)
             }
         }
-        Button(add) { rows.append(RulePair(from: from.first ?? "", to: to.first ?? "")) }  // a picker needs a value from its list
+        Button(add, systemImage: "plus") { rows.append(RulePair(from: from.first ?? "", to: to.first ?? "")) }  // a picker needs a value from its list
     }
 }
 

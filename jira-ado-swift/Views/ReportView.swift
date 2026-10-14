@@ -85,12 +85,13 @@ private struct RunDetail: View {
                     }
                     Spacer()
                     if live != nil {
-                        Button("Cancel", role: .destructive) { model.cancelRun(job.id) }
+                        IconButton("Cancel", systemImage: "stop.circle", role: .destructive,
+                                   help: "Stops after the current issue; the next sync resumes from the last checkpoint") { model.cancelRun(job.id) }
                         ProgressView().controlSize(.small)
                     } else {
                         let n = r.failedKeys.count
                         if n > 0 && r.kind != .dryRun && job.status == .active && !model.running.contains(job.id) {
-                            Button("Retry \(n) Failed") { model.retryFailed(r) }
+                            Button("Retry \(n) Failed", systemImage: "arrow.clockwise") { model.retryFailed(r) }
                                 .help("Runs just these tickets again; the cursor isn't moved")
                         }
                         Pill(r.status.rawValue, r.status.color)

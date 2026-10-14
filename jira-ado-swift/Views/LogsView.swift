@@ -29,8 +29,8 @@ struct LogsView: View {
                         Text("All statuses").tag(RunStatus?.none)
                         ForEach(RunStatus.allCases, id: \.self) { Text($0.rawValue).tag(RunStatus?.some($0)) }
                     }
-                    Button("Export JSON") { export(runs) }.disabled(runs.isEmpty)
-                    Button(chosen.isEmpty ? "Delete Selected" : "Delete \(chosen.count)…", role: .destructive) { confirm = true }
+                    IconButton("Export JSON", systemImage: "square.and.arrow.up") { export(runs) }.disabled(runs.isEmpty)
+                    IconButton(chosen.isEmpty ? "Delete Selected" : "Delete \(chosen.count)…", systemImage: "trash", role: .destructive) { confirm = true }
                         .disabled(chosen.isEmpty)
                 }
             }
