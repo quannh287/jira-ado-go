@@ -2,8 +2,8 @@ name: Build
 
 # Pushes to main and pull requests only test. A tag builds and releases; "Run workflow" builds on demand.
 # Releasing: push a tag, e.g. `git tag v0.3.0 && git push origin v0.3.0`.
-# The tag is the version: the apps are built with it, the release is published with them,
-# and mygo.json on main is bumped to it afterwards.
+# The tag is the version: the app is built with it, the release is published with it,
+# and MARKETING_VERSION on main is bumped to it afterwards.
 
 on:
   push:
@@ -12,94 +12,97 @@ on:
     paths-ignore: # changes that can't break the build or the tests (keep in sync with pull_request)
       - "**/*.md"
       - "docs/**"
-      - "design/**" # logo sources; the app ships resources/icon.png
-      - ".agents/**"
+      - "design/**" # logo sources; the app ships Assets.xcassets
       - ".gitignore"
   pull_request:
     paths-ignore:
       - "**/*.md"
       - "docs/**"
-      - "design/**" # logo sources; the app ships resources/icon.png
-      - ".agents/**"
+      - "design/**"
       - ".gitignore"
   workflow_dispatch:
 
 permissions:
-  contents: write # the release on tags, and the mygo.json bump on main
+  contents: write # the release on tags, and the version bump on main
 
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  PROJECT: jira-ado-swift.xcodeproj
+  SCHEME: jira-ado-swift
+  # Ad hoc signing, as the Go releases were: no certificate in CI. Users open it once with right-click → Open.
+  SIGNING: CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: macos-26
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: maxim-lobanov/setup-xcode@v1
         with:
-          go-version-file: go.mod
-      - run: go vet ./...
-      - name: MyGo vet (stored build values, goroutine captures)
-        run: for p in . ./internal/app ./internal/syncer ./internal/syncjob; do go tool mygo vet "$p"; done
-      - name: Test
-        env:
-          CGO_ENABLED: "0"
-        run: go test ./...
+          xcode-version: latest-stable
+      # UI tests need a logged-in GUI session with accessibility rights, which hosted runners don't grant; run them locally.
+      - name: Unit tests
+        run: |
+          xcodebuild test -project "$PROJECT" -scheme "$SCHEME" -destination 'platform=macOS' \
+            -only-testing:jira-ado-swiftTests -resultBundlePath TestResults.xcresult -quiet $SIGNING
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-results
+          path: TestResults.xcresult
 
   build:
     # Tags only (and manual runs), so a commit isn't built twice: once on main, again for its tag.
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: test
-    name: ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Signing and disk images need macOS; MyGo needs no cgo, so Ubuntu builds Windows and Linux.
-          - { name: macOS, os: macos-latest, platform: "darwin/universal" }
-          - { name: Windows, os: ubuntu-latest, platform: "windows/amd64,windows/arm64" }
-          - { name: Linux, os: ubuntu-latest, platform: "linux/amd64,linux/arm64" }
+    runs-on: macos-26
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: maxim-lobanov/setup-xcode@v1
         with:
-          go-version-file: go.mod
+          xcode-version: latest-stable
       - name: Take the version from the tag
-        if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::tag $GITHUB_REF_NAME isn't vMAJOR.MINOR.PATCH"
-            exit 1
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::tag $GITHUB_REF_NAME isn't vMAJOR.MINOR.PATCH"
+              exit 1
+            fi
+          else
+            version=$(grep -m1 'MARKETING_VERSION = ' "$PROJECT/project.pbxproj" | sed -E 's/.*= ([^;]+);/\1/')
           fi
-          # Only on this runner: the app and its file names carry the tag's version.
-          jq --arg v "$version" '.version = $v' mygo.json > mygo.json.tmp && mv mygo.json.tmp mygo.json
-      - name: Install NSIS, for the Windows installers
-        if: matrix.name == 'Windows'
-        run: sudo apt-get update && sudo apt-get install -y nsis
-      - name: Build
-        run: go tool mygo build -platform "${{ matrix.platform }}"
-      - name: Collect the files to ship
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Build (universal)
         run: |
-          mkdir -p dist
-          version=$(jq -r .version mygo.json)
-          case "${{ matrix.name }}" in
-            macOS) cp build/darwin-*/*.dmg dist/ ;;
-            Windows)
-              for d in build/windows-*; do
-                arch=${d##*-}
-                cp "$d"/*Setup*.exe dist/ 2>/dev/null || true
-                # The portable app: the exe needs the SQLite DLL and the icon next to it.
-                (cd "$d" && zip -qr "../../dist/jira-ado-$version-windows-$arch-portable.zip" . -x '*Setup*')
-              done ;;
-            Linux) cp build/linux-*/*.deb build/linux-*/*.tar.gz dist/ && cp build/linux-amd64/install.sh dist/ ;;
-          esac
+          xcodebuild build -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
+            -destination 'generic/platform=macOS' -derivedDataPath build -quiet \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
+            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" $SIGNING
+          app=build/Build/Products/Release/jira-ado.app
+          # Ad hoc signing adds get-task-allow (debugger attach); re-sign with the same entitlements minus that one.
+          codesign -d --entitlements - --xml "$app" > entitlements.plist
+          /usr/libexec/PlistBuddy -c 'Delete :com.apple.security.get-task-allow' entitlements.plist || true
+          codesign --force --sign - --options runtime --entitlements entitlements.plist "$app"
+          codesign -d --entitlements - "$app"
+          lipo -archs "$app/Contents/MacOS/jira-ado"
+          codesign --verify --strict "$app"
+          echo "APP=$app" >> "$GITHUB_ENV"
+      - name: Disk image
+        run: |
+          mkdir -p dmg dist
+          cp -R "$APP" dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "jira-ado $VERSION" -srcfolder dmg -fs HFS+ -format UDZO -ov "dist/jira-ado-$VERSION.dmg"
           ls -la dist
       - uses: actions/upload-artifact@v4
         with:
-          name: jira-ado-${{ matrix.name }}
+          name: jira-ado-macOS
           path: dist/*
           if-no-files-found: error
 
@@ -112,7 +115,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Publish the release with the apps
+      - name: Publish the release with the app
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -126,7 +129,7 @@ jobs:
           fi
 
   bump-version:
-    # After the release: main's mygo.json says the newest released version, so local builds match.
+    # After the release: main's MARKETING_VERSION says the newest released version, so local builds match.
     if: startsWith(github.ref, 'refs/tags/v')
     needs: release
     runs-on: ubuntu-latest
@@ -137,13 +140,14 @@ jobs:
       - name: Commit the version to main
         run: |
           version="${GITHUB_REF_NAME#v}"
-          current=$(jq -r .version mygo.json)
+          pbx="$PROJECT/project.pbxproj"
+          current=$(grep -m1 'MARKETING_VERSION = ' "$pbx" | sed -E 's/.*= ([^;]+);/\1/')
           newest=$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -1)
           if [ "$current" = "$version" ] || [ "$newest" != "$version" ]; then
-            echo "mygo.json is $current; not moving it to $version"
+            echo "MARKETING_VERSION is $current; not moving it to $version"
             exit 0
           fi
-          jq --arg v "$version" '.version = $v' mygo.json > mygo.json.tmp && mv mygo.json.tmp mygo.json
+          sed -i -E "s/MARKETING_VERSION = [^;]+;/MARKETING_VERSION = $version;/" "$pbx"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "chore: release $GITHUB_REF_NAME"
