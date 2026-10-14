@@ -1,8 +1,9 @@
-node_modules/
-/dist/
+.build/
 /build/
-/.mygo/
-mygo_windows_*.syso
+DerivedData/
+xcuserdata/
+.swiftpm/
+.DS_Store
 
 # exported run logs: real work item data
 sync-runs*.json
