@@ -1,0 +1,101 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write # the draft release on tags
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - name: MyGo vet (stored build values, goroutine captures)
+        run: for p in . ./internal/app ./internal/syncer ./internal/syncjob; do go tool mygo vet "$p"; done
+      - name: Test
+        env:
+          CGO_ENABLED: "0"
+        run: go test ./...
+
+  build:
+    needs: test
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Signing and disk images need macOS; MyGo needs no cgo, so Ubuntu builds Windows and Linux.
+          - { name: macOS, os: macos-latest, platform: "darwin/universal" }
+          - { name: Windows, os: ubuntu-latest, platform: "windows/amd64,windows/arm64" }
+          - { name: Linux, os: ubuntu-latest, platform: "linux/amd64,linux/arm64" }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install NSIS, for the Windows installers
+        if: matrix.name == 'Windows'
+        run: sudo apt-get update && sudo apt-get install -y nsis
+      - name: Build
+        run: go tool mygo build -platform "${{ matrix.platform }}"
+      - name: Collect the files to ship
+        run: |
+          mkdir -p dist
+          version=$(jq -r .version mygo.json)
+          case "${{ matrix.name }}" in
+            macOS) cp build/darwin-*/*.dmg dist/ ;;
+            Windows)
+              for d in build/windows-*; do
+                arch=${d##*-}
+                cp "$d"/*Setup*.exe dist/ 2>/dev/null || true
+                # The portable app: the exe needs the SQLite DLL and the icon next to it.
+                (cd "$d" && zip -qr "../../dist/jira-ado-$version-windows-$arch-portable.zip" . -x '*Setup*')
+              done ;;
+            Linux) cp build/linux-*/*.deb build/linux-*/*.tar.gz dist/ && cp build/linux-amd64/install.sh dist/ ;;
+          esac
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jira-ado-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the tag matches mygo.json
+        run: |
+          want="v$(jq -r .version mygo.json)"
+          if [ "$GITHUB_REF_NAME" != "$want" ]; then
+            echo "::error::tag $GITHUB_REF_NAME but mygo.json says $want; bump version first"
+            exit 1
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Draft the release with the apps
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+          fi
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
