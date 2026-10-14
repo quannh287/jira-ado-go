@@ -3,7 +3,7 @@ import Observation
 import UserNotifications
 
 enum Page: String, CaseIterable, Identifiable {
-    case dashboard = "Dashboard", jobs = "Sync Jobs", logs = "Logs", mappings = "Mappings", analytics = "Analytics", settings = "Settings"
+    case dashboard = "Dashboard", jobs = "Sync Jobs", logs = "Logs", mappings = "Mappings", settings = "Settings"
     var id: Self { self }
     var icon: String {
         switch self {
@@ -11,7 +11,6 @@ enum Page: String, CaseIterable, Identifiable {
         case .jobs: "arrow.triangle.2.circlepath"
         case .logs: "list.bullet"
         case .mappings: "link"
-        case .analytics: "chart.bar"
         case .settings: "gearshape"
         }
     }
@@ -392,33 +391,6 @@ final class AppModel {
     /// The Dock icon while the app runs; Finder keeps the packaged one.
     private func applyAppIcon() {
         NSApp?.applicationIconImage = AppIconOption.get(store.settings[Setting.appIcon]).image
-    }
-
-    // MARK: Import from the Go app
-
-    /// Imports the Go app's databases; the user picked them, which is what lets the sandbox read them.
-    func importLegacy(_ urls: [URL]) {
-        do {
-            let snapshots = try urls.map { url in
-                let scoped = url.startAccessingSecurityScopedResource()
-                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                return try LegacySnapshot(path: url.path)
-            }
-            let summary = try store.importLegacy(snapshots)
-            AppLog.info("legacy import", ["files": urls.count, "jobs": summary.jobs, "runs": summary.runs, "comments": summary.comments])
-            applyAppIcon()
-            updateBadge()
-            show(summary.text)
-        } catch {
-            AppLog.error("legacy import", ["err": describe(error)])
-            show("Import failed: " + describe(error))
-        }
-    }
-
-    /// Where the Go app kept its database (the real home, not the sandbox container's).
-    static var legacyDirectory: URL {
-        let home = getpwuid(getuid()).flatMap { String(validatingCString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
-        return URL(fileURLWithPath: home).appendingPathComponent("Library/Application Support/jira-ado")
     }
 
     // MARK: Mappings

@@ -34,9 +34,6 @@ struct RootView: View {
         case .jobs: JobsView()
         case .logs: LogsView()
         case .mappings: MappingsView()
-        case .analytics:
-            ContentUnavailableView("Coming soon", systemImage: "chart.bar", description: Text("Sync volume and failure trends over time."))
-                .navigationTitle("Analytics")
         case .settings: SettingsView()
         }
     }

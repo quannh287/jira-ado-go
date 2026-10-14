@@ -8,16 +8,13 @@ final class Database {
     private var db: OpaquePointer?
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-    /// readOnly opens an existing file without changing it, for importing another app's data.
-    init(path: String, readOnly: Bool = false) throws {
-        let flags = readOnly ? SQLITE_OPEN_READONLY : SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE
-        if sqlite3_open_v2(path, &db, flags, nil) != SQLITE_OK {
+    init(path: String) throws {
+        if sqlite3_open(path, &db) != SQLITE_OK {
             let msg = db.map { String(cString: sqlite3_errmsg($0)) } ?? "open failed"
             sqlite3_close(db)
             throw Failure("open database \(path): \(msg)")
         }
         sqlite3_busy_timeout(db, 5000)
-        if readOnly { return }
         try exec("PRAGMA foreign_keys = ON")
         try exec("PRAGMA journal_mode = WAL")
     }

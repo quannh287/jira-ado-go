@@ -49,7 +49,7 @@ A native macOS app that syncs Jira issues into Azure DevOps work items, one way 
 Download `jira-ado-<version>.dmg` (Apple Silicon + Intel) from the repository's **Releases** page. The app is signed ad hoc only: the first time, allow it in **System Settings → Privacy & Security → Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/jira-ado.app`.
 
 ### Moving from the Go app
-The Swift app has the same bundle ID, so it replaces `/Applications/jira-ado.app`. Your PAT and Jira token carry over through the Keychain (macOS asks once). For jobs, history and settings: **Import from Go App…** (Settings → Data, or the empty Dashboard), then pick `~/Library/Application Support/jira-ado/jira-ado.db`, and `jira-ado Dev/jira-ado.db` too if you ran dev builds: its comment links keep comments from being posted twice. The import refuses a Jira project that already has a job here.
+The Swift app has the same bundle ID, so it replaces `/Applications/jira-ado.app`. Your PAT and Jira token carry over through the Keychain (macOS asks once).
 
 ## First run
 

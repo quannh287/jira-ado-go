@@ -68,7 +68,6 @@ struct JobsTable: View {
                 } actions: {
                     Button("New Sync Job") { model.path.append(.create) }
                         .accessibilityIdentifier("empty.newJob")
-                    ImportLegacyButton()
                 }
             }
         }

@@ -73,11 +73,6 @@ struct SettingsView: View {
                 SecureField("API token", text: $jiraToken).help("Stored in the macOS Keychain, never in the database.")
                 TextField("Extra JQL", text: $jql, prompt: Text("issuetype in (Bug, Task)")).help("ANDed into every search.")
             }
-            Section("Data") {
-                LabeledContent("Previous app") { ImportLegacyButton() }
-                Text("Brings in the Go app's jobs, run history, sync cursors, comment links and settings. Pick its jira-ado.db (and the Dev one too: its comment links stop comments being posted twice). The PAT and Jira token are already shared through the Keychain.")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
             if !AppLog.path.isEmpty {
                 Section("Diagnostics") {
                     LabeledContent("Log file") {
@@ -130,27 +125,6 @@ struct SettingsView: View {
     }
 }
 
-/// Opens the Go app's folder and imports the databases the user picks.
-struct ImportLegacyButton: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        Button("Import from Go App…") {
-            let panel = NSOpenPanel()
-            panel.title = "Import jira-ado data"
-            panel.message = "Choose the Go app's jira-ado.db files (Application Support/jira-ado and jira-ado Dev)."
-            panel.allowsMultipleSelection = true
-            panel.canChooseDirectories = false
-            panel.directoryURL = AppModel.legacyDirectory
-            if panel.runModal() == .OK { model.importLegacy(panel.urls) }
-        }
-    }
-}
-
 #Preview("Settings") {
     NavigationStack { SettingsView() }.previewModel().frame(width: 760, height: 1000)
-}
-
-#Preview("Import Button") {
-    ImportLegacyButton().previewModel().padding()
 }

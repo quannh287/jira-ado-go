@@ -124,10 +124,9 @@ final class JiraADOUITests: XCTestCase {
         XCTAssertTrue(text("PAUSED").exists)
     }
 
-    func testEmptyDashboardOffersToCreateOrImport() {
+    func testEmptyDashboardOffersToCreateAJob() {
         launch(empty: true)
         wait(text("No sync jobs yet"))
-        XCTAssertTrue(button("Import from Go App…").exists)
         click(field("empty.newJob"), until: field("job.name"))
     }
 
@@ -266,7 +265,7 @@ final class JiraADOUITests: XCTestCase {
     func testSidebarPages() {
         launch()
         for (page, marker) in [("Sync Jobs", "Mobile bugs → ADO"), ("Logs", "All jobs"), ("Mappings", "Work item types"),
-                               ("Analytics", "Coming soon"), ("Settings", "Test Jira"), ("Dashboard", "Total Jobs")] {
+                               ("Settings", "Test Jira"), ("Dashboard", "Total Jobs")] {
             sidebar(page)
             wait(app.descendants(matching: .any).matching(NSPredicate(format: "value == %@ OR label == %@ OR title == %@", marker, marker, marker)).firstMatch)
         }

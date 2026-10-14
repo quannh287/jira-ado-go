@@ -189,37 +189,6 @@ final class Store {
     /// The job's newest run that really synced; dry runs don't count.
     func lastRun(_ jobID: Int) -> Run? { runs.first { $0.jobID == jobID && $0.kind != .dryRun } }
 
-    /// Writes imported data in one transaction; memory follows only after COMMIT, so a failure leaves the store untouched.
-    func insertImported(jobs newJobs: [Job], runs newRuns: [Run], cursors: [(Int, String)], comments: [CommentMapping], settings imported: [String: String]) throws {
-        var stmts: [Database.Statement] = []
-        for j in newJobs {
-            stmts.append(("INSERT INTO jobs (id, name, jira_key, ado_project, type, status, created, mappings, filters) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                          [j.id, j.name, j.jiraKey, j.adoProject, j.type.rawValue, j.status.rawValue, ms(j.created), encode(j.mappings), encode(j.filters)]))
-            stmts += j.activity.map { activityStmt(j.id, $0) }
-        }
-        for r in newRuns {
-            stmts.append(("INSERT INTO runs (id, job_id, started, duration_ms, since, error, kind, tickets) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                          [r.id, r.jobID, ms(r.started), Int(r.duration * 1000), r.since, r.error, r.kind.rawValue, encode(r.tickets)]))
-        }
-        stmts += cursors.map { ("INSERT INTO sync_state (job_id, cursor) VALUES (?, ?) ON CONFLICT(job_id) DO UPDATE SET cursor = excluded.cursor", [$0.0, $0.1]) }
-        stmts += comments.map {
-            ("""
-             INSERT INTO comment_mappings (ado_work_item_id, jira_comment_id, ado_comment_id, jira_updated) VALUES (?, ?, ?, ?)
-             ON CONFLICT(ado_work_item_id, jira_comment_id) DO NOTHING
-             """, [$0.workItemID, $0.jiraCommentID, $0.adoCommentID, $0.jiraUpdated])
-        }
-        stmts += imported.map { ("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [$0.key, $0.value]) }
-        if let db { try db.transaction(stmts) } else {
-            for (job, c) in cursors { memCursors[job] = c }
-            for m in comments where memComments[m.workItemID]?[m.jiraCommentID] == nil { memComments[m.workItemID, default: [:]][m.jiraCommentID] = m }
-        }
-        jobs += newJobs
-        runs = newRuns.reversed() + runs
-        nextJob = max(nextJob, newJobs.map(\.id).max() ?? 0)
-        nextRun = max(nextRun, newRuns.map(\.id).max() ?? 0)
-        settings.merge(imported) { $1 }
-    }
-
     // MARK: Settings
 
     func setSetting(_ key: String, _ value: String) {
