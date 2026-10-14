@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
+	_ "time/tzdata" // the Jira account zone for JQL dates; Windows has no zoneinfo of its own
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"

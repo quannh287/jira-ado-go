@@ -124,14 +124,34 @@ func (c *Client) NodeExists(ctx context.Context, kind, path string) (bool, error
 	return err == nil, err
 }
 
-// Fields reads the given fields of a work item.
-func (c *Client) Fields(ctx context.Context, id int, fields []string) (map[string]any, error) {
-	var out struct {
-		Fields map[string]any `json:"fields"`
+// Relation is one link of a work item: a parent, a child, an attached file…
+type Relation struct {
+	Rel string `json:"rel"`
+	URL string `json:"url"`
+}
+
+// WorkItem is a work item's current fields and relations.
+type WorkItem struct {
+	Fields    map[string]any `json:"fields"`
+	Relations []Relation     `json:"relations"`
+}
+
+// Get reads every field and relation in one call ($expand can't be combined with a field list).
+func (c *Client) Get(ctx context.Context, id int) (WorkItem, error) {
+	var w WorkItem
+	err := c.send(ctx, "GET", fmt.Sprintf("/wit/workitems/%d?$expand=relations&api-version=%s", id, apiVersion), "", nil, &w)
+	return w, err
+}
+
+// HasParent reports whether the relations already link the item under parentID.
+func HasParent(rels []Relation, parentID int) bool {
+	suffix := fmt.Sprintf("/workItems/%d", parentID)
+	for _, r := range rels {
+		if r.Rel == "System.LinkTypes.Hierarchy-Reverse" && strings.HasSuffix(strings.ToLower(r.URL), strings.ToLower(suffix)) {
+			return true
+		}
 	}
-	path := fmt.Sprintf("/wit/workitems/%d?fields=%s&api-version=%s", id, strings.Join(fields, ","), apiVersion)
-	err := c.send(ctx, "GET", path, "", nil, &out)
-	return out.Fields, err
+	return false
 }
 
 func (c *Client) Create(ctx context.Context, workItemType string, ops []Op) (int, error) {
@@ -155,19 +175,12 @@ func (c *Client) ParentRelation(parentID int) Op {
 	}}
 }
 
-// RemoveAttachments drops every AttachedFile relation of a work item.
-func (c *Client) RemoveAttachments(ctx context.Context, id int) error {
-	var out struct {
-		Relations []struct {
-			Rel string `json:"rel"`
-		} `json:"relations"`
-	}
-	if err := c.send(ctx, "GET", fmt.Sprintf("/wit/workitems/%d?$expand=relations&api-version=%s", id, apiVersion), "", nil, &out); err != nil {
-		return err
-	}
+// RemoveAttachments drops every AttachedFile relation, given the item's relations as read by Get.
+// Links added since then went to the end, so these indexes still hold.
+func (c *Client) RemoveAttachments(ctx context.Context, id int, rels []Relation) error {
 	var ops []Op
-	for i := len(out.Relations) - 1; i >= 0; i-- { // from the end so earlier indexes stay valid
-		if out.Relations[i].Rel == "AttachedFile" {
+	for i := len(rels) - 1; i >= 0; i-- { // from the end so earlier indexes stay valid
+		if rels[i].Rel == "AttachedFile" {
 			ops = append(ops, Op{Op: "remove", Path: fmt.Sprintf("/relations/%d", i)})
 		}
 	}

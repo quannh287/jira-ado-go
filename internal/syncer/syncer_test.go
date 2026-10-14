@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +26,14 @@ type fakeJira struct {
 	assigneeBlind bool // Jira can't resolve the users in `assignee in` and answers empty
 	failDetail    string
 	noSprintField bool
+	loc           *time.Location
+}
+
+func (f *fakeJira) TimeZone(context.Context) (*time.Location, error) {
+	if f.loc == nil {
+		return time.UTC, nil
+	}
+	return f.loc, nil
 }
 
 const sprintField = "customfield_10020"
@@ -70,6 +80,9 @@ func (f *fakeJira) Search(_ context.Context, jql string, _ []string) ([]jira.Iss
 		return out, nil
 	}
 	if m := idIn.FindStringSubmatch(jql); m != nil {
+		if f.failDetail != "" && strings.Contains(jql, "project =") && strings.Contains(m[1], f.failDetail) {
+			return nil, errors.New("jira 500") // the batch fails; each issue is then fetched alone
+		}
 		var out []jira.Issue
 		for _, id := range strings.Split(m[1], ",") {
 			out = append(out, f.byID(id)...)
@@ -109,11 +122,13 @@ type item struct {
 	parent   int
 	comments map[int]string
 	attached []string
+	patches  int
 }
 
 // fakeADO is an in-memory ADO that enforces the state rules the sync works around.
 type fakeADO struct {
 	missing       map[string]bool // classification paths that don't exist
+	finds         int             // WIQL lookups
 	panicOnCreate bool
 	items         map[int]*item
 	next          int
@@ -129,6 +144,7 @@ func (a *fakeADO) NodeExists(_ context.Context, _, path string) (bool, error) {
 }
 
 func (a *fakeADO) FindByField(_ context.Context, field, value string) (int, error) {
+	a.finds++
 	for id, it := range a.items {
 		if it.fields[field] == value {
 			return id, nil
@@ -137,8 +153,20 @@ func (a *fakeADO) FindByField(_ context.Context, field, value string) (int, erro
 	return 0, nil
 }
 
-func (a *fakeADO) Fields(_ context.Context, id int, _ []string) (map[string]any, error) {
-	return a.items[id].fields, nil
+func (a *fakeADO) Get(_ context.Context, id int) (ado.WorkItem, error) {
+	it := a.items[id]
+	var rels []ado.Relation
+	if it.parent != 0 {
+		rels = append(rels, ado.Relation{Rel: "System.LinkTypes.Hierarchy-Reverse", URL: fmt.Sprintf("https://x/_apis/wit/workItems/%d", it.parent)})
+	}
+	for range it.attached {
+		rels = append(rels, ado.Relation{Rel: "AttachedFile", URL: "https://x/att"})
+	}
+	fields := map[string]any{}
+	for k, v := range it.fields {
+		fields[k] = v
+	}
+	return ado.WorkItem{Fields: fields, Relations: rels}, nil
 }
 
 func (a *fakeADO) Create(_ context.Context, typ string, ops []ado.Op) (int, error) {
@@ -155,6 +183,7 @@ func (a *fakeADO) Create(_ context.Context, typ string, ops []ado.Op) (int, erro
 }
 
 func (a *fakeADO) Update(_ context.Context, id int, ops []ado.Op) error {
+	a.items[id].patches++
 	return a.apply(a.items[id], ops, false)
 }
 
@@ -163,7 +192,10 @@ func (a *fakeADO) apply(it *item, ops []ado.Op, creating bool) error {
 		if op.Path == "/relations/-" {
 			rel := op.Value.(map[string]string)
 			if rel["rel"] == "System.LinkTypes.Hierarchy-Reverse" {
-				it.parent = 1
+				if it.parent != 0 {
+					return errors.New("400: the parent link already exists")
+				}
+				fmt.Sscanf(rel["url"][strings.LastIndex(rel["url"], "/")+1:], "%d", &it.parent)
 			}
 			continue
 		}
@@ -183,10 +215,11 @@ func (a *fakeADO) apply(it *item, ops []ado.Op, creating bool) error {
 }
 
 func (a *fakeADO) ParentRelation(parentID int) ado.Op {
-	return ado.Op{Op: "add", Path: "/relations/-", Value: map[string]string{"rel": "System.LinkTypes.Hierarchy-Reverse"}}
+	return ado.Op{Op: "add", Path: "/relations/-", Value: map[string]string{"rel": "System.LinkTypes.Hierarchy-Reverse",
+		"url": fmt.Sprintf("https://x/_apis/wit/workItems/%d", parentID)}}
 }
 
-func (a *fakeADO) RemoveAttachments(_ context.Context, id int) error {
+func (a *fakeADO) RemoveAttachments(_ context.Context, id int, _ []ado.Relation) error {
 	a.items[id].attached = nil
 	return nil
 }
@@ -290,7 +323,7 @@ func TestFirstRunCreatesParentsThenSubtasks(t *testing.T) {
 
 	// The next run only asks for issues updated since the cursor.
 	e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
-	if !strings.HasPrefix(j.jqls[4], `updated >= "2026/10/14 09:00" AND project = "SE"`) {
+	if !slices.ContainsFunc(j.jqls, func(q string) bool { return strings.HasPrefix(q, `updated >= "2026/10/14 09:00" AND project = "SE"`) }) {
 		t.Fatalf("second run JQLs %q", j.jqls)
 	}
 }
@@ -518,6 +551,82 @@ func TestCustomRules(t *testing.T) {
 	// Unmapped values fall back like the source: the type's first state, priority 4.
 	if got := c.Rules.OrDefault().State("Bug", "Weird"); got != "New" {
 		t.Fatalf("fallback state %q", got)
+	}
+}
+
+func TestJQLTimeZone(t *testing.T) {
+	cursor := time.Date(2026, 10, 14, 7, 14, 49, 0, time.UTC)
+	sg, _ := time.LoadLocation("Asia/Singapore")
+	if got := jqlTime(cursor, sg); got != "2026/10/14 15:14" {
+		t.Fatalf("Singapore: %q", got)
+	}
+	if got := jqlTime(cursor, nil); got != "2026/10/13 19:14" {
+		t.Fatalf("unknown zone must reach 12h back: %q", got)
+	}
+	e, j, _, _, job := setup()
+	j.loc = sg
+	e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
+	e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
+	found := false
+	for _, q := range j.jqls {
+		found = found || strings.HasPrefix(q, `updated >= "2026/10/14 17:00"`) // t0 09:00 UTC in Singapore
+	}
+	if !found {
+		t.Fatalf("cursor not written in the account zone: %q", j.jqls)
+	}
+}
+
+func TestUnchangedItemsGetNoWrites(t *testing.T) {
+	e, j, a, _, job := setup()
+	first := e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
+	pbi, task := first.Tickets[0].ADOID, first.Tickets[1].ADOID
+	patches := a.items[pbi].patches + a.items[task].patches
+	finds := a.finds
+
+	run := e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
+	if run.Count(syncjob.Skipped) != 2 || !strings.Contains(run.Tickets[0].Message, "already up to date") {
+		t.Fatalf("unchanged run %+v", run.Tickets)
+	}
+	if got := a.items[pbi].patches + a.items[task].patches; got != patches {
+		t.Fatalf("%d PATCHes for unchanged items", got-patches)
+	}
+	// The sub-task's parent comes from the run's cache: one lookup per ticket, not two.
+	if got := a.finds - finds; got != 2 {
+		t.Fatalf("%d WIQL lookups, want 2", got)
+	}
+
+	// A real change writes it.
+	j.issues[0].Fields.Summary = "renamed"
+	run = e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
+	if run.Tickets[0].Outcome != syncjob.Updated || a.items[pbi].fields[syncjob.FieldTitle] != "SE-1 - 10 - renamed" {
+		t.Fatalf("rename not synced: %+v", run.Tickets[0])
+	}
+}
+
+func TestAttachmentsLeftAloneWhenJiraHasNone(t *testing.T) {
+	e, _, a, _, job := setup()
+	id := e.Sync(context.Background(), conn, job, syncjob.RunOptions{}).Tickets[0].ADOID
+	a.items[id].attached = []string{"added-in-ado.png"}
+	e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
+	if len(a.items[id].attached) != 1 {
+		t.Fatalf("an ADO-only attachment was removed: %v", a.items[id].attached)
+	}
+}
+
+func TestDetailsFetchedInBatches(t *testing.T) {
+	e, j, _, _, job := setup()
+	e.Sync(context.Background(), conn, job, syncjob.RunOptions{})
+	var perIssue, batch int
+	for _, q := range j.jqls {
+		switch {
+		case strings.HasPrefix(q, "id = "):
+			perIssue++
+		case strings.HasPrefix(q, "id in (10,11) AND project"):
+			batch++
+		}
+	}
+	if perIssue != 0 || batch != 1 {
+		t.Fatalf("per-issue %d, batch %d: %q", perIssue, batch, j.jqls)
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 
 type jiraAPI interface {
 	SprintField(ctx context.Context) (string, error)
+	TimeZone(ctx context.Context) (*time.Location, error)
 	Search(ctx context.Context, jql string, fields []string) ([]jira.Issue, error)
 	Comments(ctx context.Context, key string) ([]jira.Comment, error)
 	Download(ctx context.Context, url string) ([]byte, error)
@@ -28,11 +29,11 @@ type jiraAPI interface {
 type adoAPI interface {
 	NodeExists(ctx context.Context, kind, path string) (bool, error)
 	FindByField(ctx context.Context, field, value string) (int, error)
-	Fields(ctx context.Context, id int, fields []string) (map[string]any, error)
+	Get(ctx context.Context, id int) (ado.WorkItem, error)
 	Create(ctx context.Context, workItemType string, ops []ado.Op) (int, error)
 	Update(ctx context.Context, id int, ops []ado.Op) error
 	ParentRelation(parentID int) ado.Op
-	RemoveAttachments(ctx context.Context, id int) error
+	RemoveAttachments(ctx context.Context, id int, rels []ado.Relation) error
 	Attach(ctx context.Context, id int, name string, data []byte) error
 	AddComment(ctx context.Context, id int, html string) (int, error)
 	UpdateComment(ctx context.Context, id, commentID int, html string) error
@@ -78,6 +79,10 @@ type run struct {
 	state syncjob.State      // e.State, or a read-only view of it in a dry run
 	rules syncjob.Rules      // value mappings, defaults filled in
 	dry   bool
+	// ids caches "KEY - id" → ADO work item for the run, so sub-tasks don't look up the same parent again.
+	ids map[string]int
+	// loc is the Jira account's time zone, which JQL dates are read in.
+	loc *time.Location
 	// firstRun has no cursor: it imports the whole backlog, so Done items are skipped without a comment each.
 	firstRun bool
 	// sprintField is Jira's Sprint custom field, read when iterations follow the Jira sprint.
@@ -149,12 +154,17 @@ func (e *Engine) Sync(ctx context.Context, conn syncjob.Connection, job syncjob.
 	}
 	report()
 	cp := newCheckpoint(issues)
-	for _, is := range issues {
+	details := map[string]jira.Issue{}
+	fetched := map[string]bool{} // in a batch that answered: missing from details means Jira filtered it out
+	for i, is := range issues {
 		if ctx.Err() != nil {
 			out.Error = stopReason(ctx, ctx.Err(), nil)
 			return out // cursor stays at the last checkpoint, so the next run resumes here
 		}
-		t := r.process(ctx, is)
+		if i%detailBatch == 0 {
+			r.fetchDetails(ctx, issues[i:min(i+detailBatch, len(issues))], details, fetched, lg)
+		}
+		t := r.process(ctx, is, details, fetched[is.ID])
 		out.Tickets = append(out.Tickets, t)
 		report()
 		if t.Outcome == syncjob.Failed {
@@ -184,7 +194,7 @@ func (e *Engine) newRun(conn syncjob.Connection, job syncjob.Job, dry bool) (*ru
 		return nil, fmt.Errorf("Not configured: %s (Settings)", m)
 	}
 	conn.JiraKeyField = cmpOr(conn.JiraKeyField, syncjob.DefaultJiraKeyField)
-	r := &run{e: e, conn: conn, job: job, state: e.State, rules: conn.Rules.OrDefault(), dry: dry}
+	r := &run{e: e, conn: conn, job: job, state: e.State, rules: conn.Rules.OrDefault(), dry: dry, ids: map[string]int{}, loc: time.UTC}
 	logCall := func(c ado.Call) {
 		if r.calls != nil {
 			*r.calls = append(*r.calls, syncjob.APICall{Method: c.Method, URL: c.URL, Request: c.Request, Status: c.Status,
@@ -273,8 +283,38 @@ func (r *run) byKeys(ctx context.Context, keys []string) ([]jira.Issue, error) {
 	return issues, nil
 }
 
+// detailBatch is how many issues one Jira search fetches in full; one search per issue was the source's N+1.
+const detailBatch = 50
+
+// fetchDetails loads the full fields of a batch; on failure the issues fall back to one search each in process.
+func (r *run) fetchDetails(ctx context.Context, batch []jira.Issue, into map[string]jira.Issue, fetched map[string]bool, lg *slog.Logger) {
+	ids := make([]string, len(batch))
+	for i, is := range batch {
+		ids[i] = is.ID
+	}
+	got, err := r.jira.Search(ctx, r.scopedJQL("id in ("+strings.Join(ids, ",")+")"), jira.AllFields)
+	if err != nil {
+		lg.Warn("batch detail fetch failed; fetching one by one", "issues", len(ids), "err", err)
+		return
+	}
+	for _, d := range got {
+		into[d.ID] = d
+	}
+	for _, id := range ids {
+		fetched[id] = true
+	}
+}
+
 // detect lists the issues to process: updated since the cursor, plus sub-tasks of those parents, parents first.
 func (r *run) detect(ctx context.Context, since string) ([]jira.Issue, error) {
+	if since != "" {
+		loc, err := r.jira.TimeZone(ctx)
+		if err != nil || loc == nil {
+			slog.Warn("Jira time zone unknown; reading 12h further back so no issue is missed", "job", r.job.ID, "err", err)
+			loc = nil
+		}
+		r.loc = loc
+	}
 	assignees := r.job.Filters.AssigneeList()
 	if !r.job.Filters.UserFilter {
 		assignees = nil
@@ -327,8 +367,7 @@ var searchFields = []string{"id", "subtasks", "updated", "issuetype", "parent"}
 func (r *run) searchJQL(since string, assignees []string) string {
 	var parts []string
 	if since != "" {
-		// ponytail: formatted in UTC but Jira reads it in the account's time zone; east of UTC it only re-reads a few hours
-		parts = append(parts, fmt.Sprintf(`updated >= "%s"`, parseJiraTime(since).UTC().Format("2006/01/02 15:04")))
+		parts = append(parts, fmt.Sprintf(`updated >= "%s"`, jqlTime(parseJiraTime(since), r.loc)))
 	}
 	parts = append(parts, "project = "+jqlQuote(r.job.JiraKey))
 	if r.conn.JQLExtra != "" {
@@ -365,4 +404,13 @@ func cmpOr(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// jqlTime writes t as Jira reads JQL dates: wall-clock time in the account's zone, to the minute (rounded down,
+// so the window never starts late). Without a zone it goes 12h back: read in any zone (UTC-12…UTC+14) it starts no later than t.
+func jqlTime(t time.Time, loc *time.Location) string {
+	if loc == nil {
+		return t.UTC().Add(-12 * time.Hour).Format("2006/01/02 15:04")
+	}
+	return t.In(loc).Format("2006/01/02 15:04")
 }

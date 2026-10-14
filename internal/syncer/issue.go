@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -23,7 +24,8 @@ type fields struct {
 }
 
 // process syncs one issue and reports what happened; it never returns an error, a failure is a Failed ticket.
-func (r *run) process(ctx context.Context, is jira.Issue) (t syncjob.Ticket) {
+// details holds the batch-fetched issue; fetched says the batch answered, so a missing issue was filtered out by Jira.
+func (r *run) process(ctx context.Context, is jira.Issue, details map[string]jira.Issue, fetched bool) (t syncjob.Ticket) {
 	t = syncjob.Ticket{Key: is.Key}
 	r.calls = &t.Calls
 	defer func() { r.calls = nil }()
@@ -32,15 +34,20 @@ func (r *run) process(ctx context.Context, is jira.Issue) (t syncjob.Ticket) {
 		return t
 	}
 
-	details, err := r.jira.Search(ctx, r.detailJQL(is.ID), jira.AllFields)
-	if err != nil {
-		return fail(err)
+	d, ok := details[is.ID]
+	if !ok && !fetched { // the batch failed: one search for this issue alone
+		got, err := r.jira.Search(ctx, r.scopedJQL("id = "+is.ID), jira.AllFields)
+		if err != nil {
+			return fail(err)
+		}
+		if ok = len(got) > 0; ok {
+			d = got[0]
+		}
 	}
-	if len(details) == 0 {
+	if !ok {
 		t.Outcome, t.Message = syncjob.Skipped, "No detail returned from Jira"
 		return t
 	}
-	d := details[0]
 	t.Key, t.Summary = d.Key, d.Fields.Summary
 	if p := d.Fields.Parent; p != nil {
 		t.ParentKey = p.Key
@@ -59,29 +66,33 @@ func (r *run) process(ctx context.Context, is jira.Issue) (t syncjob.Ticket) {
 		}
 	}
 
-	existing, err := r.ado.FindByField(ctx, r.conn.JiraKeyField, f.key)
+	existing, err := r.findID(ctx, f.key)
 	if err != nil {
 		return fail(err)
 	}
 	if p := d.Fields.Parent; p != nil && p.Key != "" {
-		if f.parentID, err = r.ado.FindByField(ctx, r.conn.JiraKeyField, p.Key+" - "+p.ID); err != nil {
+		if f.parentID, err = r.findID(ctx, p.Key+" - "+p.ID); err != nil {
 			return fail(err)
 		}
 	}
 
+	var rels []ado.Relation // the item's current links, read once by update; none for a new item
+	wrote := true
 	if existing != 0 {
 		t.ADOID = existing
-		skipped, err := r.update(ctx, existing, f, d)
+		res, err := r.update(ctx, existing, f, d)
 		if err != nil {
 			return fail(err)
 		}
-		if skipped {
+		rels = res.rels
+		if res.done {
 			t.Outcome, t.Message = syncjob.Skipped, fmt.Sprintf("ADO #%d is Done - skipped update, commented instead", existing)
 			if r.firstRun {
 				t.Message = fmt.Sprintf("ADO #%d is Done - skipped (first run imports the backlog, so no comment)", existing)
 			}
 			return t
 		}
+		wrote = res.wrote
 		t.Outcome, t.Message = syncjob.Updated, fmt.Sprintf("Updated ADO %s #%d", f.wiType, existing)
 		if r.dry {
 			t.Message = fmt.Sprintf("Would update ADO %s #%d", f.wiType, existing)
@@ -91,6 +102,7 @@ func (r *run) process(ctx context.Context, is jira.Issue) (t syncjob.Ticket) {
 		if err != nil {
 			return fail(err)
 		}
+		r.ids[f.key] = id
 		t.ADOID = id
 		t.Outcome, t.Message = syncjob.Created, fmt.Sprintf("Created ADO %s #%d", f.wiType, id)
 		if r.dry {
@@ -99,10 +111,15 @@ func (r *run) process(ctx context.Context, is jira.Issue) (t syncjob.Ticket) {
 	}
 
 	// Attachment and comment failures don't fail the ticket, as in the source; they show up as warnings.
-	var warnings []string
-	warnings = append(warnings, r.syncAttachments(ctx, t.ADOID, d.Fields.Attachment)...)
+	written, warnings := r.syncAttachments(ctx, t.ADOID, d.Fields.Attachment, rels, existing == 0)
 	if r.job.Filters.SyncComments {
-		warnings = append(warnings, r.syncComments(ctx, d.Key, t.ADOID)...)
+		n, w := r.syncComments(ctx, d.Key, t.ADOID)
+		written, warnings = written+n, append(warnings, w...)
+	}
+	if !wrote && written == 0 {
+		t.Outcome, t.Message = syncjob.Skipped, fmt.Sprintf("ADO #%d already up to date", existing)
+	} else if !wrote {
+		t.Message = fmt.Sprintf("ADO #%d fields already up to date; synced comments/attachments", existing)
 	}
 	if len(warnings) > 0 {
 		t.Message += " · " + strings.Join(warnings, "; ")
@@ -110,8 +127,21 @@ func (r *run) process(ctx context.Context, is jira.Issue) (t syncjob.Ticket) {
 	return t
 }
 
-func (r *run) detailJQL(id string) string {
-	parts := []string{"id = " + id, "project = " + jqlQuote(r.job.JiraKey)}
+// findID resolves "KEY - id" to an ADO work item once per run; 0 when there is none yet.
+func (r *run) findID(ctx context.Context, link string) (int, error) {
+	if id, ok := r.ids[link]; ok {
+		return id, nil
+	}
+	id, err := r.ado.FindByField(ctx, r.conn.JiraKeyField, link)
+	if err == nil && id != 0 {
+		r.ids[link] = id // not-found isn't cached: this run may create it
+	}
+	return id, err
+}
+
+// scopedJQL limits clause to the job's project and the extra JQL.
+func (r *run) scopedJQL(clause string) string {
+	parts := []string{clause, "project = " + jqlQuote(r.job.JiraKey)}
 	if r.conn.JQLExtra != "" {
 		parts = append(parts, "("+r.conn.JQLExtra+")")
 	}
@@ -179,9 +209,6 @@ func (r *run) ops(f fields) []ado.Op {
 		}
 		ops = append(ops, ado.Op{Op: "add", Path: "/fields/" + x.field, Value: x.value})
 	}
-	if f.parentID != 0 {
-		ops = append(ops, r.ado.ParentRelation(f.parentID))
-	}
 	return ops
 }
 
@@ -189,7 +216,11 @@ func (r *run) ops(f fields) []ado.Op {
 func (r *run) create(ctx context.Context, f fields) (int, error) {
 	initial := f
 	initial.state = syncjob.InitialState(f.wiType)
-	id, err := r.ado.Create(ctx, f.wiType, r.ops(initial))
+	ops := r.ops(initial)
+	if f.parentID != 0 {
+		ops = append(ops, r.ado.ParentRelation(f.parentID))
+	}
+	id, err := r.ado.Create(ctx, f.wiType, ops)
 	if err != nil {
 		return 0, err
 	}
@@ -201,27 +232,36 @@ func (r *run) create(ctx context.Context, f fields) (int, error) {
 	return id, nil
 }
 
-// update reports skipped=true when ADO has the item Done: ADO wins, the change is only commented.
-func (r *run) update(ctx context.Context, id int, f fields, d jira.Issue) (skipped bool, err error) {
-	cur, err := r.ado.Fields(ctx, id, append([]string{syncjob.FieldTitle, syncjob.FieldState, "System.IterationPath"}, preserved...))
+type updateResult struct {
+	done  bool           // ADO has it Done: left alone (commented)
+	wrote bool           // something was sent: fields, the Removed reset or a conflict comment
+	rels  []ado.Relation // the item's links before this update
+}
+
+// update reads the item once, then writes only fields whose value differs; ADO's Done wins and is only commented.
+func (r *run) update(ctx context.Context, id int, f fields, d jira.Issue) (updateResult, error) {
+	w, err := r.ado.Get(ctx, id)
 	if err != nil {
-		return false, err
+		return updateResult{}, err
 	}
+	cur, res := w.Fields, updateResult{rels: w.Relations}
 	state, _ := cur[syncjob.FieldState].(string)
-	if state == "Done" && r.firstRun {
-		return true, nil // a backlog import would leave one comment on every old Done item
-	}
 	if state == "Done" {
+		res.done = true
+		if r.firstRun {
+			return res, nil // a backlog import would leave one comment on every old Done item
+		}
 		_, err := r.ado.AddComment(ctx, id, fmt.Sprintf(
 			"<p>Jira <b>%s</b> vừa được cập nhật nhưng work item này đang ở trạng thái <b>Done</b> nên sync đã bỏ qua, không ghi đè. Vui lòng kiểm tra và cập nhật thủ công nếu cần.</p>",
 			escape(f.key)))
-		return true, err
+		return res, err
 	}
 	// Removed can only go back to the first state; jumping straight to a later one is a 400.
 	if state == "Removed" && f.state != "Removed" {
 		if err := r.ado.Update(ctx, id, []ado.Op{{Op: "add", Path: "/fields/" + syncjob.FieldState, Value: syncjob.InitialState(f.wiType)}}); err != nil {
-			return false, err
+			return res, err
 		}
+		cur[syncjob.FieldState], res.wrote = syncjob.InitialState(f.wiType), true
 	}
 
 	var conflicts []string
@@ -247,29 +287,99 @@ func (r *run) update(ctx context.Context, id int, f fields, d jira.Issue) (skipp
 		f.completed = 0
 	}
 
-	if err := r.ado.Update(ctx, id, r.ops(f)); err != nil {
-		return false, err
+	ops := changedOps(r.ops(f), cur)
+	if f.parentID != 0 && !ado.HasParent(w.Relations, f.parentID) {
+		ops = append(ops, r.ado.ParentRelation(f.parentID))
+	}
+	if len(ops) > 0 {
+		if err := r.ado.Update(ctx, id, ops); err != nil {
+			return res, err
+		}
+		res.wrote = true
 	}
 	if len(conflicts) > 0 {
 		html := fmt.Sprintf("<p>Sync từ Jira <b>%s</b> không ghi đè các field đã có giá trị trên ADO:</p><ul><li>%s</li></ul>",
 			escape(f.key), strings.Join(conflicts, "</li><li>"))
 		if _, err := r.ado.AddComment(ctx, id, html); err != nil {
-			return false, err
+			return res, err
 		}
+		res.wrote = true
 	}
-	return false, nil
+	return res, nil
 }
 
-// syncAttachments replaces every ADO attachment with Jira's.
-// ponytail: re-uploads all files on every update like the source; diff by name+size if uploads get slow
-func (r *run) syncAttachments(ctx context.Context, id int, atts []jira.Attachment) []string {
-	var warnings []string
-	if err := r.ado.RemoveAttachments(ctx, id); err != nil {
-		warnings = append(warnings, "remove attachments: "+err.Error())
+// changedOps drops the field ops whose value ADO already has, so an unchanged item gets no PATCH, revision or notification.
+func changedOps(ops []ado.Op, cur map[string]any) []ado.Op {
+	var out []ado.Op
+	for _, op := range ops {
+		field, ok := strings.CutPrefix(op.Path, "/fields/")
+		if ok && sameADOValue(field, cur[field], op.Value) {
+			continue
+		}
+		out = append(out, op)
 	}
+	return out
+}
+
+// sameADOValue compares what ADO returns for a field with what the sync would write.
+// When unsure it answers false: an extra write is harmless, a skipped one loses a change.
+func sameADOValue(field string, have, want any) bool {
+	if have == nil {
+		return isEmpty(want)
+	}
+	switch field {
+	case syncjob.FieldAssignedTo, syncjob.FieldCreatedBy: // ADO returns an identity object
+		if m, ok := have.(map[string]any); ok {
+			u, _ := m["uniqueName"].(string)
+			w, _ := want.(string)
+			return u != "" && strings.EqualFold(u, w)
+		}
+	case syncjob.FieldStartDate: // same instant, written with a different offset
+		h, _ := have.(string)
+		w, _ := want.(string)
+		ht, wt := parseJiraTime(h), parseJiraTime(w)
+		return !ht.IsZero() && ht.Equal(wt)
+	case syncjob.FieldTargetDate:
+		return sameValue(have, want)
+	case syncjob.FieldDescription:
+		h, _ := have.(string)
+		w, _ := want.(string)
+		return normalizeHTML(h) == normalizeHTML(w)
+	case "System.AreaPath", "System.IterationPath":
+		h, _ := have.(string)
+		w, _ := want.(string)
+		return strings.EqualFold(h, w)
+	}
+	if _, ok := have.(float64); ok {
+		return sameValue(have, want)
+	}
+	return fmt.Sprint(have) == fmt.Sprint(want)
+}
+
+// normalizeHTML evens out what ADO rewrites in stored HTML (void tags, whitespace) before comparing.
+func normalizeHTML(s string) string {
+	s = strings.NewReplacer("<br/>", "<br>", "<br />", "<br>", "<hr/>", "<hr>", "<hr />", "<hr>").Replace(s)
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// syncAttachments replaces the item's ADO attachments with Jira's; with none in Jira it does nothing,
+// so files people attached in ADO stay. It returns how many files it wrote.
+// ponytail: re-uploads all files when Jira has any, like the source; diff by name+size if uploads get slow
+func (r *run) syncAttachments(ctx context.Context, id int, atts []jira.Attachment, rels []ado.Relation, created bool) (int, []string) {
+	if len(atts) == 0 {
+		return 0, nil
+	}
+	var warnings []string
+	if !created && slices.ContainsFunc(rels, func(rl ado.Relation) bool { return rl.Rel == "AttachedFile" }) {
+		if err := r.ado.RemoveAttachments(ctx, id, rels); err != nil {
+			warnings = append(warnings, "remove attachments: "+err.Error())
+		}
+	}
+	written := 0
 	for _, a := range atts {
 		if r.dry { // no download either: the dry run only needs the names
 			_ = r.ado.Attach(ctx, id, a.Filename, nil)
+			written++
 			continue
 		}
 		data, err := r.jira.Download(ctx, a.Content)
@@ -278,25 +388,29 @@ func (r *run) syncAttachments(ctx context.Context, id int, atts []jira.Attachmen
 		}
 		if err != nil {
 			warnings = append(warnings, "attach "+a.Filename+": "+err.Error())
+			continue
 		}
+		written++
 	}
-	return warnings
+	return written, warnings
 }
 
 // syncComments copies new Jira comments and patches edited ones in place; comments deleted in Jira are left alone.
-func (r *run) syncComments(ctx context.Context, key string, id int) []string {
+// It returns how many comments it wrote.
+func (r *run) syncComments(ctx context.Context, key string, id int) (int, []string) {
 	comments, err := r.jira.Comments(ctx, key)
 	if err != nil {
-		return []string{"comments: " + err.Error()}
+		return 0, []string{"comments: " + err.Error()}
 	}
 	if len(comments) == 0 {
-		return nil
+		return 0, nil
 	}
 	state := r.state
 	mapped, err := state.CommentMappings(ctx, id)
 	if err != nil {
-		return []string{"comment mappings: " + err.Error()}
+		return 0, []string{"comment mappings: " + err.Error()}
 	}
+	written := 0
 	var warnings []string
 	for _, c := range comments {
 		m, ok := mapped[c.ID]
@@ -308,6 +422,8 @@ func (r *run) syncComments(ctx context.Context, key string, id int) []string {
 			}
 			if err != nil {
 				warnings = append(warnings, "comment "+c.ID+": "+err.Error())
+			} else {
+				written++
 			}
 		case c.Updated != "" && c.Updated != m.JiraUpdated:
 			err := r.ado.UpdateComment(ctx, id, m.ADOCommentID, renderComment(c, true))
@@ -317,10 +433,12 @@ func (r *run) syncComments(ctx context.Context, key string, id int) []string {
 			}
 			if err != nil {
 				warnings = append(warnings, "comment "+c.ID+": "+err.Error())
+			} else {
+				written++
 			}
 		}
 	}
-	return warnings
+	return written, warnings
 }
 
 // renderComment prefixes the Jira author, since the ADO comment is posted as the PAT's user.

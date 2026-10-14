@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"time"
 
 	"jira-ado/internal/httpx"
 )
@@ -185,6 +186,20 @@ func (c *Client) Comments(ctx context.Context, key string) ([]Comment, error) {
 func (c *Client) Download(ctx context.Context, contentURL string) ([]byte, error) {
 	resp, err := c.h.Do(ctx, "GET", contentURL, "", nil)
 	return resp.Body, err
+}
+
+// TimeZone is the account's time zone, the one Jira reads JQL dates in.
+func (c *Client) TimeZone(ctx context.Context) (*time.Location, error) {
+	var u struct {
+		TimeZone string `json:"timeZone"`
+	}
+	if err := c.json(ctx, "GET", "/myself", nil, &u); err != nil {
+		return nil, err
+	}
+	if u.TimeZone == "" {
+		return time.UTC, nil
+	}
+	return time.LoadLocation(u.TimeZone)
 }
 
 // Myself checks the credentials and returns the account's display name.

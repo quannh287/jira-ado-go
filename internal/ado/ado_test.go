@@ -109,3 +109,13 @@ func TestNodeExists(t *testing.T) {
 		t.Fatalf("requests %q", paths)
 	}
 }
+
+func TestHasParent(t *testing.T) {
+	rels := []Relation{
+		{Rel: "AttachedFile", URL: "https://x/att/1"},
+		{Rel: "System.LinkTypes.Hierarchy-Reverse", URL: "https://dev.azure.com/o/p/_apis/wit/workItems/32143"},
+	}
+	if !HasParent(rels, 32143) || HasParent(rels, 3214) || HasParent(rels, 1) {
+		t.Fatal("HasParent matched the wrong parent")
+	}
+}

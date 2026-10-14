@@ -37,7 +37,7 @@ func (d *dryADO) Update(_ context.Context, id int, ops []ado.Op) error {
 }
 
 // RemoveAttachments must not reach the real client, whose implementation writes.
-func (d *dryADO) RemoveAttachments(_ context.Context, id int) error {
+func (d *dryADO) RemoveAttachments(_ context.Context, id int, _ []ado.Relation) error {
 	d.record("PATCH", fmt.Sprintf("/wit/workitems/%d (remove attachments)", id), nil)
 	return nil
 }
