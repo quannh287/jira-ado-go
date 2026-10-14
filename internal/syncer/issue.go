@@ -79,6 +79,9 @@ func (r *run) process(ctx context.Context, is jira.Issue) (t syncjob.Ticket) {
 		}
 		if skipped {
 			t.Outcome, t.Message = syncjob.Skipped, fmt.Sprintf("ADO #%d is Done - skipped update, commented instead", existing)
+			if r.firstRun {
+				t.Message = fmt.Sprintf("ADO #%d is Done - skipped (first run imports the backlog, so no comment)", existing)
+			}
 			return t
 		}
 		t.Outcome, t.Message = syncjob.Updated, fmt.Sprintf("Updated ADO %s #%d", f.wiType, existing)
@@ -132,6 +135,9 @@ func (r *run) fieldsOf(d jira.Issue) fields {
 		f.originalEstimate, f.remaining, f.completed = hours(jf.AggregateTimeOriginalEstimate), hours(jf.AggregateTimeEstimate), hours(jf.AggregateTimeSpent)
 	}
 	f.area, f.iteration = r.job.Paths(r.e.Now())
+	if r.job.Filters.AutoPaths && !d.InActiveSprint(r.sprintField) {
+		f.iteration = r.job.BacklogPath() // out of sprint, or taken out of one: back to the backlog
+	}
 	f.assignedTo = resolveEmail(jf.Assignee, r.job.Filters.Users)
 	f.createdBy = resolveEmail(jf.Reporter, r.job.Filters.Users)
 	return f
@@ -197,6 +203,9 @@ func (r *run) update(ctx context.Context, id int, f fields, d jira.Issue) (skipp
 		return false, err
 	}
 	state, _ := cur[syncjob.FieldState].(string)
+	if state == "Done" && r.firstRun {
+		return true, nil // a backlog import would leave one comment on every old Done item
+	}
 	if state == "Done" {
 		_, err := r.ado.AddComment(ctx, id, fmt.Sprintf(
 			"<p>Jira <b>%s</b> vừa được cập nhật nhưng work item này đang ở trạng thái <b>Done</b> nên sync đã bỏ qua, không ghi đè. Vui lòng kiểm tra và cập nhật thủ công nếu cần.</p>",

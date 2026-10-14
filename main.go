@@ -1,15 +1,20 @@
 package main
 
 import (
+	"cmp"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
 	"jira-ado/internal/app"
+	"jira-ado/internal/appicon"
+	"jira-ado/internal/applog"
 	"jira-ado/internal/keychain"
 	"jira-ado/internal/syncer"
 	"jira-ado/internal/syncjob"
@@ -18,14 +23,27 @@ import (
 const keychainService = "com.example.jiraado"
 
 func main() {
+	// Logging first, so even a failure to open the database is in the file.
+	logPath := ""
+	if logs, err := mygo.App.Path(mygo.PathLogs); err == nil {
+		if p, closer, err := applog.Setup(logs); err == nil {
+			logPath = p
+			defer closer.Close()
+		} else {
+			log.Printf("file log unavailable: %v", err)
+		}
+	}
+	slog.Info("app start", "version", cmp.Or(mygo.App.Version(), "dev"), "os", runtime.GOOS, "arch", runtime.GOARCH, "demo", os.Getenv("JIRA_ADO_DEMO") == "1")
 	dir, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
-		log.Fatal(err)
+		fatal("app data dir", err)
 	}
-	store, err := syncjob.Open(filepath.Join(dir, "jira-ado.db"), time.Now)
+	dbPath := filepath.Join(dir, "jira-ado.db")
+	store, err := syncjob.Open(dbPath, time.Now)
 	if err != nil {
-		log.Fatal(err)
+		fatal("open database "+dbPath, err)
 	}
+	slog.Info("database open", "path", dbPath, "jobs", len(store.Jobs), "runs", len(store.Runs))
 	defer store.Close()
 
 	var engine syncjob.Engine = syncer.New(store.State(), time.Now)
@@ -41,6 +59,7 @@ func main() {
 		Jira: keychain.Secret{Service: keychainService, Account: "jira-api-token"},
 	}
 	a := app.New(engine, store, keys, time.Now)
+	a.LogPath = logPath
 
 	mygo.App.WhenReady(func() {
 		win := mygo.NewWindow(mygo.WindowOptions{
@@ -55,14 +74,28 @@ func main() {
 			BackgroundColor: "light-dark(#ffffff, #1c1c1e)", // shown before the first frame
 			Content:         ui.View(a.View),
 		})
+		appicon.SetIcon = mygo.App.Dock.SetIcon
+		appicon.Apply(store.Settings[appicon.SettingKey])
 		a.Async = func(work, done func()) {
 			go func() {
+				// A panic in background work is logged with its stack; done still runs so the UI leaves its busy state.
+				defer func() {
+					if p := recover(); p != nil {
+						applog.Recovered("background work", p)
+					}
+					win.Update(done)
+				}()
 				work()
-				win.Update(done)
 			}()
 		}
 	})
 	if err := mygo.App.Run(); err != nil {
-		log.Fatal(err)
+		fatal("app run", err)
 	}
+	slog.Info("app quit")
+}
+
+func fatal(what string, err error) {
+	slog.Error("fatal", "what", what, "err", err)
+	os.Exit(1)
 }

@@ -48,3 +48,32 @@ func TestCommentsPaginate(t *testing.T) {
 		t.Fatalf("got %+v err %v", got, err)
 	}
 }
+
+func TestSprint(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/field":
+			io.WriteString(w, `[{"id":"summary","schema":{}},{"id":"customfield_10020","schema":{"custom":"com.pyxis.greenhopper.jira:gh-sprint"}}]`)
+		default:
+			io.WriteString(w, `{"issues":[
+				{"id":"1","key":"CAT-1","fields":{"summary":"a","customfield_10020":[{"id":5,"state":"closed"},{"id":6,"state":"active"}]}},
+				{"id":"2","key":"CAT-2","fields":{"summary":"b","customfield_10020":[{"id":7,"state":"future"}]}},
+				{"id":"3","key":"CAT-3","fields":{"summary":"c","customfield_10020":null}}],"isLast":true}`)
+		}
+	}))
+	defer srv.Close()
+	c := NewWith(httpx.New(srv.URL, "x"))
+	field, err := c.SprintField(context.Background())
+	if err != nil || field != "customfield_10020" {
+		t.Fatalf("field %q err %v", field, err)
+	}
+	issues, err := c.Search(context.Background(), "x", AllFields)
+	if err != nil || issues[0].Fields.Summary != "a" {
+		t.Fatalf("issues %+v err %v", issues, err)
+	}
+	for i, want := range []bool{true, false, false} {
+		if got := issues[i].InActiveSprint(field); got != want {
+			t.Errorf("%s in active sprint = %v, want %v", issues[i].Key, got, want)
+		}
+	}
+}

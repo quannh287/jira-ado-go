@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -73,10 +74,13 @@ func (a *App) signIn() {
 	}, func() {
 		f.checking = false
 		if err != nil {
+			slog.Warn("ADO sign-in failed", "org", org, "err", err) // never the PAT
 			f.err = err.Error()
 			return
 		}
+		slog.Info("ADO sign-in", "org", org, "user", name, "remember", remember)
 		if saveErr != nil {
+			slog.Error("save PAT to keychain", "err", saveErr)
 			a.notice = "Signed in for this session only: " + saveErr.Error()
 		}
 		a.pat, f.pat = pat, ""

@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strings"
@@ -22,6 +23,27 @@ type fakeJira struct {
 	jqls          []string
 	assigneeBlind bool // Jira can't resolve the users in `assignee in` and answers empty
 	failDetail    string
+	noSprintField bool
+}
+
+const sprintField = "customfield_10020"
+
+func (f *fakeJira) SprintField(context.Context) (string, error) {
+	if f.noSprintField {
+		return "", nil
+	}
+	return sprintField, nil
+}
+
+// inSprint puts an issue in a Jira sprint with the given state ("" = no sprint).
+func inSprint(i *jira.Issue, state string) {
+	if i.Raw == nil {
+		i.Raw = map[string]json.RawMessage{}
+	}
+	i.Raw[sprintField] = json.RawMessage("null")
+	if state != "" {
+		i.Raw[sprintField] = json.RawMessage(`[{"id":1,"state":"` + state + `"}]`)
+	}
 }
 
 var idIn = regexp.MustCompile(`id in \(([^)]*)\)`)
@@ -79,9 +101,10 @@ type item struct {
 
 // fakeADO is an in-memory ADO that enforces the state rules the sync works around.
 type fakeADO struct {
-	items  map[int]*item
-	next   int
-	keyFld string
+	panicOnCreate bool
+	items         map[int]*item
+	next          int
+	keyFld        string
 }
 
 func newFakeADO() *fakeADO {
@@ -102,6 +125,9 @@ func (a *fakeADO) Fields(_ context.Context, id int, _ []string) (map[string]any,
 }
 
 func (a *fakeADO) Create(_ context.Context, typ string, ops []ado.Op) (int, error) {
+	if a.panicOnCreate {
+		panic("nil map write in a client")
+	}
 	a.next++
 	it := &item{typ: typ, fields: map[string]any{}, comments: map[int]string{}}
 	if err := a.apply(it, ops, true); err != nil {
@@ -192,6 +218,7 @@ func issue(id, key, status string, parent *jira.Ref, updated string) jira.Issue 
 func setup() (*Engine, *fakeJira, *fakeADO, syncjob.State, syncjob.Job) {
 	parent := issue("10", "SE-1", "In Progress", nil, "2026-10-10T10:00:00.000+0700")
 	parent.Fields.Subtasks = []jira.Ref{{ID: "11", Key: "SE-2"}}
+	inSprint(&parent, "active") // the sub-task stays out of any sprint
 	sub := issue("11", "SE-2", "To Do", &jira.Ref{ID: "10", Key: "SE-1"}, "2026-10-02T10:00:00.000+0700")
 	sub.Fields.AggregateTimeOriginalEstimate = 7200
 	j := &fakeJira{issues: []jira.Issue{parent, sub}, comments: map[string][]jira.Comment{}}
@@ -228,8 +255,11 @@ func TestFirstRunCreatesParentsThenSubtasks(t *testing.T) {
 	if pbi.fields[syncjob.FieldDescription] != "<p><strong>a&lt;b</strong></p>" {
 		t.Fatalf("description %q", pbi.fields[syncjob.FieldDescription])
 	}
-	if pbi.fields["System.IterationPath"] != `Tickets\Weekly Sprint\Sprint 82` {
+	if pbi.fields["System.IterationPath"] != `Tickets\Weekly Sprint\Sprint 82` || pbi.fields["System.AreaPath"] != syncjob.DefaultAreaPath {
 		t.Fatalf("iteration %q", pbi.fields["System.IterationPath"])
+	}
+	if task.fields["System.IterationPath"] != `Tickets\Weekly Sprint` {
+		t.Fatalf("out-of-sprint task iteration %q, want the backlog", task.fields["System.IterationPath"])
 	}
 	if task.typ != "Task" || task.parent == 0 || task.fields[syncjob.FieldOriginalEstimate] != 2.0 {
 		t.Fatalf("task %+v", task)
@@ -320,6 +350,53 @@ func TestComments(t *testing.T) {
 	e.Sync(context.Background(), conn, job)
 	if got := a.items[id].comments[1]; !strings.Contains(got, "(edited)") || len(a.items[id].comments) != 1 {
 		t.Fatalf("edited comment not patched in place: %v", a.items[id].comments)
+	}
+}
+
+func TestSprintPlacement(t *testing.T) {
+	e, j, a, _, job := setup()
+	id := e.Sync(context.Background(), conn, job).Tickets[0].ADOID
+	if a.items[id].fields["System.IterationPath"] != `Tickets\Weekly Sprint\Sprint 82` {
+		t.Fatalf("active sprint → %q", a.items[id].fields["System.IterationPath"])
+	}
+	// Taken out of the sprint in Jira (a future sprint counts as out): back to the backlog.
+	inSprint(&j.issues[0], "future")
+	e.Sync(context.Background(), conn, job)
+	if a.items[id].fields["System.IterationPath"] != `Tickets\Weekly Sprint` {
+		t.Fatalf("left the sprint → %q, want the backlog", a.items[id].fields["System.IterationPath"])
+	}
+
+	// Without a Sprint field nothing is written: everything would otherwise drop to the backlog.
+	e2, j2, a2, _, job2 := setup()
+	j2.noSprintField = true
+	run := e2.Sync(context.Background(), conn, job2)
+	if run.Status() != syncjob.Error || len(a2.items) != 0 || !strings.Contains(run.Error, "Sprint field") {
+		t.Fatalf("run %+v items %d", run, len(a2.items))
+	}
+	// A fixed iteration doesn't need it.
+	job2.Filters.AutoPaths, job2.Filters.Iteration = false, `Tickets\Fixed`
+	if run := e2.Sync(context.Background(), conn, job2); run.Error != "" || a2.items[run.Tickets[0].ADOID].fields["System.IterationPath"] != `Tickets\Fixed` {
+		t.Fatalf("fixed iteration run %+v", run)
+	}
+}
+
+func TestFirstRunDoesNotCommentDoneItems(t *testing.T) {
+	e, _, a, state, job := setup()
+	id := e.Sync(context.Background(), conn, job).Tickets[0].ADOID
+	a.items[id].fields[syncjob.FieldState] = "Done"
+	state.SetCursor(context.Background(), job.ID, "") // as if this were the job's first run
+	run := e.Sync(context.Background(), conn, job)
+	if run.Tickets[0].Outcome != syncjob.Skipped || len(a.items[id].comments) != 0 || !strings.Contains(run.Tickets[0].Message, "first run") {
+		t.Fatalf("first run commented a Done item: %+v comments %v", run.Tickets[0], a.items[id].comments)
+	}
+}
+
+func TestPanicBecomesFailedRun(t *testing.T) {
+	e, _, a, _, job := setup()
+	a.panicOnCreate = true
+	run := e.Sync(context.Background(), conn, job) // must not take the app down
+	if run.Status() != syncjob.Error || !strings.Contains(run.Error, "internal error in sync") || run.Duration < 0 {
+		t.Fatalf("run %+v", run)
 	}
 }
 

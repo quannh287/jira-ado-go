@@ -67,6 +67,62 @@ type Issue struct {
 	ID     string `json:"id"`
 	Key    string `json:"key"`
 	Fields Fields `json:"fields"`
+	// Raw keeps every field, for custom fields whose ID differs per site, such as Sprint.
+	Raw map[string]json.RawMessage `json:"-"`
+}
+
+func (i *Issue) UnmarshalJSON(b []byte) error {
+	var aux struct {
+		ID     string          `json:"id"`
+		Key    string          `json:"key"`
+		Fields json.RawMessage `json:"fields"`
+	}
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	i.ID, i.Key = aux.ID, aux.Key
+	if len(aux.Fields) == 0 || string(aux.Fields) == "null" {
+		return nil
+	}
+	if err := json.Unmarshal(aux.Fields, &i.Fields); err != nil {
+		return err
+	}
+	return json.Unmarshal(aux.Fields, &i.Raw)
+}
+
+// InActiveSprint reports whether the issue sits in a sprint that has started and not closed.
+func (i Issue) InActiveSprint(sprintField string) bool {
+	var sprints []struct {
+		State string `json:"state"`
+	}
+	if json.Unmarshal(i.Raw[sprintField], &sprints) != nil {
+		return false
+	}
+	for _, s := range sprints {
+		if s.State == "active" {
+			return true
+		}
+	}
+	return false
+}
+
+// SprintField returns the ID of the Jira Software Sprint field (e.g. customfield_10020), or "" if the site has none.
+func (c *Client) SprintField(ctx context.Context) (string, error) {
+	var fields []struct {
+		ID     string `json:"id"`
+		Schema struct {
+			Custom string `json:"custom"`
+		} `json:"schema"`
+	}
+	if err := c.json(ctx, "GET", "/field", nil, &fields); err != nil {
+		return "", fmt.Errorf("jira fields: %w", err)
+	}
+	for _, f := range fields {
+		if f.Schema.Custom == "com.pyxis.greenhopper.jira:gh-sprint" {
+			return f.ID, nil
+		}
+	}
+	return "", nil
 }
 
 type Comment struct {

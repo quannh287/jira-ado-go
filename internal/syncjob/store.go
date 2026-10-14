@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -195,10 +196,9 @@ func (s *Store) write(stmts ...sqlite.Statement) {
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
 	if _, err := s.db.Transaction(ctx, stmts); err != nil {
+		slog.Error("store write failed", "statements", len(stmts), "first", firstWords(stmts), "err", err)
 		if s.OnSaveError != nil {
 			s.OnSaveError(err)
-		} else {
-			log.Printf("syncjob: write: %v", err)
 		}
 	}
 }
@@ -441,4 +441,13 @@ func (m *memState) SaveCommentMapping(_ context.Context, c CommentMapping) error
 	}
 	m.comments[c.WorkItemID][c.JiraCommentID] = c
 	return nil
+}
+
+// firstWords names a failed batch in the log ("INSERT INTO runs") without its values.
+func firstWords(stmts []sqlite.Statement) string {
+	if len(stmts) == 0 {
+		return ""
+	}
+	f := strings.Fields(stmts[0].SQL)
+	return strings.Join(f[:min(3, len(f))], " ")
 }

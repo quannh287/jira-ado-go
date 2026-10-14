@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -294,7 +295,7 @@ func (a *App) stepFilters(c *ui.Context) {
 		ui.Field(c, "Area path", func() { ui.TextInput(c.Key("area"), &f.AreaPath).Placeholder(syncjob.DefaultAreaPath) })
 		ui.Field(c, "Iteration", func() {
 			ui.RadioGroup(c, func() {
-				ui.Radio(c, &f.AutoPaths, true, "Weekly sprint")
+				ui.Radio(c, &f.AutoPaths, true, "Follow Jira sprint")
 				ui.Radio(c, &f.AutoPaths, false, "Fixed path")
 			}).Row().Gap(16).Label("Iteration")
 		})
@@ -305,9 +306,10 @@ func (a *App) stepFilters(c *ui.Context) {
 				ui.NumberInput(c.Key("anchor"), &anchor, 1, 9999, 1).Width(120).OnChange(func() { f.AnchorSprint = int(anchor) })
 			})
 			ui.Field(c, "Anchor date", func() { ui.TextInput(c.Key("anchordate"), &f.AnchorDate).Placeholder("2026-06-01").Width(140) }).
-				Description("Monday the anchor sprint starts; one sprint per week after it.")
+				Description("Monday the anchor sprint starts; one ADO sprint per week after it.")
 			_, it := a.draft.job.Paths(a.now())
-			kv(c, "This week", it)
+			kv(c, "In active Jira sprint", it)
+			kv(c, "Otherwise (backlog)", a.draft.job.BacklogPath())
 		} else {
 			ui.Field(c, "Iteration path", func() { ui.TextInput(c.Key("iter"), &f.Iteration).Placeholder(`Tickets\Sprint 42`) })
 		}
@@ -389,7 +391,8 @@ func filtersRows(c *ui.Context, f syncjob.Filters, area, iteration string) {
 	kv(c, "Assignees", scope)
 	kv(c, "Area path", area)
 	if f.AutoPaths {
-		kv(c, "Iteration", fmt.Sprintf("%s (weekly, Sprint %d = %s)", iteration, f.AnchorSprint, f.AnchorDate))
+		kv(c, "In active Jira sprint", fmt.Sprintf("%s (weekly, Sprint %d = %s)", iteration, f.AnchorSprint, f.AnchorDate))
+		kv(c, "Otherwise (backlog)", cmp.Or(f.SprintRoot, syncjob.DefaultSprintRoot))
 	} else {
 		kv(c, "Iteration", iteration)
 	}

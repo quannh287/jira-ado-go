@@ -14,7 +14,8 @@ A native desktop app that syncs Jira issues into Azure DevOps work items, one wa
   - Descriptions are converted from Jira's format to HTML.
   - Comments are copied, and editing one in Jira updates the same ADO comment.
   - Attachments are copied.
-- **ADO stays in charge**: items that are Done in ADO are never overwritten; the change is added as a comment instead. Estimates and dates already filled in ADO are kept, and the differences are commented.
+- **Sprints follow Jira**: an issue in an active Jira sprint goes to the current ADO sprint. Any other issue, including one taken out of its sprint, goes to the backlog (the sprint root path). Alternatively, every issue can go to one fixed iteration.
+- **ADO stays in charge**: items that are Done in ADO are never overwritten; the change is added as a comment instead. On a job's first run, which imports the whole backlog, no comment is added. Estimates and dates already filled in ADO are kept, and the differences are commented.
 - **Report**: for every run you can see what was written to each work item, with links to Jira and ADO. Every ADO API call is logged and can be expanded when you need to debug.
 - **Logs**: all runs across jobs, with filters, JSON export and bulk delete.
 - **Local and private**: jobs and history are stored in SQLite on your machine. The ADO PAT and the Jira token are stored in the OS keychain.

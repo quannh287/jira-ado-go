@@ -8,6 +8,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"jira-ado/internal/appicon"
 	"jira-ado/internal/syncjob"
 )
 
@@ -38,11 +39,14 @@ const (
 	setJQLExtra     = "jql_extra"
 	setJiraKeyField = "jira_key_field"
 	setTheme        = "theme"
+	setAppIcon      = appicon.SettingKey
 )
 
 type App struct {
 	// Async runs work off the UI thread, then done on it; the default runs both inline, for tests.
 	Async func(work, done func())
+	// LogPath is the diagnostic log file, shown in Settings so a problem can be traced.
+	LogPath string
 
 	engine  syncjob.Engine
 	store   *syncjob.Store

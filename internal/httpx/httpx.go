@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -65,10 +65,13 @@ func (c *Client) Do(ctx context.Context, method, path, contentType string, body 
 			err = &StatusError{Method: method, URL: url, Status: status, Body: data}
 		}
 		if attempt >= c.Retries || !transient(ctx, status, err) {
+			// Only the URL and status: bodies and headers can hold work item data or credentials.
+			slog.Warn("http request failed", "method", method, "url", url, "status", status, "retries", attempt,
+				"elapsed", resp.Duration.Round(time.Millisecond), "err", truncate([]byte(err.Error()), 500))
 			return resp, err
 		}
 		delay := c.BaseDelay << attempt
-		log.Printf("httpx: %s %s -> %v; retry %d in %s", method, url, statusOr(status, err), attempt+1, delay)
+		slog.Info("http retry", "method", method, "url", url, "status", statusOr(status, err), "attempt", attempt+1, "delay", delay)
 		select {
 		case <-time.After(delay):
 		case <-ctx.Done():

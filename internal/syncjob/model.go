@@ -38,7 +38,9 @@ type Filters struct {
 	Assignees  string // comma-separated Jira users (email or display name)
 	Users      []UserPair
 	AreaPath   string
-	// AutoPaths derives the iteration as SprintRoot\Sprint N, N = AnchorSprint + full weeks since AnchorDate; else Iteration is fixed.
+	// AutoPaths follows the Jira sprint: issues in an active Jira sprint go to the current ADO sprint
+	// SprintRoot\Sprint N (N = AnchorSprint + full weeks since AnchorDate), all others to the backlog SprintRoot.
+	// Off, every issue goes to the fixed Iteration.
 	AutoPaths    bool
 	Iteration    string
 	SprintRoot   string
@@ -48,7 +50,7 @@ type Filters struct {
 
 // Defaults of the source app (domain/entities/SyncJob.ts DEFAULT_ADO_CONFIG).
 const (
-	DefaultAreaPath     = `Tickets\Clients\C-Keppel\C-KIT\P-KAI`
+	DefaultAreaPath     = `Tickets\KPL\KAI` // what the real jobs use; the source's default no longer exists in ADO
 	DefaultSprintRoot   = `Tickets\Weekly Sprint`
 	DefaultAnchorSprint = 63
 	DefaultAnchorDate   = "2026-06-01"
@@ -88,7 +90,10 @@ type Job struct {
 	Activity   []Activity
 }
 
-// Paths returns the area and iteration paths a run at t would use.
+// BacklogPath is where issues outside an active Jira sprint go when AutoPaths is on.
+func (j Job) BacklogPath() string { return cmp.Or(j.Filters.SprintRoot, DefaultSprintRoot) }
+
+// Paths returns the area path and the iteration of an issue in an active Jira sprint, for a run at t.
 func (j Job) Paths(t time.Time) (area, iteration string) {
 	f := j.Filters
 	if !f.AutoPaths {

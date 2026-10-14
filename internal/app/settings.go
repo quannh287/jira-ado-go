@@ -2,12 +2,15 @@ package app
 
 import (
 	"context"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 
+	"jira-ado/internal/appicon"
 	"jira-ado/internal/syncjob"
 )
 
@@ -33,6 +36,8 @@ func (a *App) settingsPage(c *ui.Context) {
 							ui.Segmented(c.Key("theme"), &mode, "System", "Light", "Dark").Label("Theme").
 								OnChange(func() { a.store.SetSetting(setTheme, themeModes[mode]) })
 						}).Description("The content area; the sidebar is always dark.")
+						ui.Field(c, "App icon", func() { a.appIconPicker(c) }).
+							Description("The Dock icon while the app runs; Finder keeps the packaged icon.")
 					})
 					ui.Fieldset(c, "Azure DevOps", func() {
 						kv(c, "Organization", a.store.Settings[setADOOrg])
@@ -52,6 +57,18 @@ func (a *App) settingsPage(c *ui.Context) {
 						ui.Field(c, "Extra JQL", func() { ui.TextInput(c.Key("jql"), &f.jqlExtra).Placeholder("issuetype in (Bug, Task)") }).
 							Description("ANDed into every search.")
 					})
+					if a.LogPath != "" {
+						ui.Fieldset(c, "Diagnostics", func() {
+							ui.Field(c, "Log file", func() {
+								ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+									ui.Text(c, a.LogPath).Font("monospace").FontSize(11).Selectable().Grow(1).MinWidth(0).SingleLine()
+									svc := c.Services()
+									ui.Button(c.Key("openlogs"), "Show in Finder").OnClick(func() { svc.OpenURL("file://" + filepath.Dir(a.LogPath)) })
+									ui.Button(c.Key("copylog"), "Copy Path").OnClick(func() { svc.WriteClipboard(a.LogPath) })
+								})
+							}).Description("Every sync, HTTP failure and crash is logged here with its job, run and ticket; never tokens or PATs. Attach it when reporting a problem.")
+						})
+					}
 				})
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					if f.checking {
@@ -64,6 +81,40 @@ func (a *App) settingsPage(c *ui.Context) {
 			})
 		})
 	})
+}
+
+// iconThumbs decodes each icon once; Bitmaps are costly to build.
+var iconThumbs = sync.OnceValue(func() []*ui.Bitmap {
+	bs := make([]*ui.Bitmap, len(appicon.Options))
+	for i, o := range appicon.Options {
+		bs[i], _ = ui.DecodeBitmap(o.PNG) // ponytail: embedded PNGs are known-good
+	}
+	return bs
+})
+
+func (a *App) appIconPicker(c *ui.Context) {
+	t := c.Theme()
+	icon := appicon.Get(a.store.Settings[setAppIcon]).ID
+	ui.RadioGroup(c, func() {
+		for i, o := range appicon.Options {
+			ring := ui.RGBA(0, 0, 0, 0)
+			if o.ID == icon {
+				ring = t.Accent
+			}
+			ui.RadioBase(c.Key("icon-"+o.ID), &icon, o.ID).Label(o.Name).Column().Gap(6).AlignItems(ui.Center).
+				Cursor(ui.CursorPointer).OnChange(func() { a.setAppIcon(icon) }).Children(func() {
+				ui.Column(c).Padding(3).Radius(16).Border(2, ring).Children(func() {
+					ui.Image(c, iconThumbs()[i]).Size(56, 56)
+				})
+				ui.Text(c, o.Name).FontSize(12).TextColor(t.TextMuted)
+			})
+		}
+	}).Row().Gap(16).Label("App icon")
+}
+
+func (a *App) setAppIcon(id string) {
+	a.store.SetSetting(setAppIcon, id)
+	appicon.Apply(id)
 }
 
 func (a *App) saveSettings() {

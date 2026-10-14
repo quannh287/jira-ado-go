@@ -5,18 +5,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
 
 	"jira-ado/internal/ado"
+	"jira-ado/internal/applog"
 	"jira-ado/internal/httpx"
 	"jira-ado/internal/jira"
 	"jira-ado/internal/syncjob"
 )
 
 type jiraAPI interface {
+	SprintField(ctx context.Context) (string, error)
 	Search(ctx context.Context, jql string, fields []string) ([]jira.Issue, error)
 	Comments(ctx context.Context, key string) ([]jira.Comment, error)
 	Download(ctx context.Context, url string) ([]byte, error)
@@ -76,12 +78,31 @@ type run struct {
 	jira  jiraAPI
 	ado   adoAPI
 	calls *[]syncjob.APICall // the current ticket's ADO calls
+	// firstRun has no cursor: it imports the whole backlog, so Done items are skipped without a comment each.
+	firstRun bool
+	// sprintField is Jira's Sprint custom field, read when iterations follow the Jira sprint.
+	sprintField string
 }
 
 func (e *Engine) Sync(ctx context.Context, conn syncjob.Connection, job syncjob.Job) (out syncjob.Run) {
 	start := e.Now()
 	out = syncjob.Run{JobID: job.ID, Started: start}
-	defer func() { out.Duration = e.Now().Sub(start) }() // named result, so every return path gets it
+	// run ties every log line of this sync together; the run's DB id isn't known until the UI saves it.
+	lg := slog.With("run", fmt.Sprintf("%d-%d", job.ID, start.Unix()), "job", job.ID, "jira", job.JiraKey, "ado", job.ADOProject)
+	defer func() { // named result, so every return path, a panic included, gets the duration and a log line
+		if p := recover(); p != nil {
+			out.Error = applog.Recovered("sync", p, "job", job.ID).Error()
+		}
+		out.Duration = e.Now().Sub(start)
+		attrs := []any{"since", out.Since, "duration", out.Duration.Round(time.Millisecond), "tickets", len(out.Tickets),
+			"created", out.Count(syncjob.Created), "updated", out.Count(syncjob.Updated), "skipped", out.Count(syncjob.Skipped), "failed", out.Count(syncjob.Failed)}
+		if out.Error != "" {
+			lg.Error("sync failed", append(attrs, "err", out.Error)...)
+		} else {
+			lg.Info("sync done", attrs...)
+		}
+	}()
+	lg.Info("sync start")
 	if m := conn.Missing(); m != "" {
 		out.Error = "Not configured: " + m + " (Settings)"
 		return out
@@ -102,12 +123,23 @@ func (e *Engine) Sync(ctx context.Context, conn syncjob.Connection, job syncjob.
 		return out
 	}
 	out.Since = since
+	r.firstRun = since == ""
+	if job.Filters.AutoPaths {
+		// Without the Sprint field every issue would look out of sprint and be moved to the backlog, so stop instead.
+		if r.sprintField, err = r.jira.SprintField(ctx); err != nil || r.sprintField == "" {
+			out.Error = "Can't read Jira's Sprint field, so issues can't be placed by sprint"
+			if err != nil {
+				out.Error += ": " + err.Error()
+			}
+			return out
+		}
+	}
 	issues, err := r.detect(ctx, since)
 	if err != nil {
 		out.Error = err.Error()
 		return out
 	}
-	log.Printf("syncer: job %d: %d issue(s) since %q", job.ID, len(issues), since)
+	lg.Info("issues detected", "count", len(issues), "since", since, "first_run", r.firstRun)
 
 	cp := newCheckpoint(issues)
 	for _, is := range issues {
@@ -115,18 +147,24 @@ func (e *Engine) Sync(ctx context.Context, conn syncjob.Connection, job syncjob.
 			out.Error = "stopped: " + ctx.Err().Error()
 			return out // cursor stays at the last checkpoint, so the next run resumes here
 		}
-		out.Tickets = append(out.Tickets, r.process(ctx, is))
+		t := r.process(ctx, is)
+		out.Tickets = append(out.Tickets, t)
+		if t.Outcome == syncjob.Failed {
+			lg.Warn("ticket failed", "key", t.Key, "ado_id", t.ADOID, "type", t.WorkItemType, "err", t.Error)
+		} else if strings.Contains(t.Message, " · ") { // attachment/comment warnings
+			lg.Warn("ticket synced with warnings", "key", t.Key, "ado_id", t.ADOID, "msg", t.Message)
+		}
 		// Checkpoint per issue; a failed issue still advances it on purpose — its ticket result is the record to rerun.
 		if iso := cp.advance(is.ID); iso != "" {
 			if err := e.State.SetCursor(ctx, job.ID, iso); err != nil {
-				log.Printf("syncer: job %d: save checkpoint: %v", job.ID, err)
+				lg.Error("save checkpoint", "cursor", iso, "err", err)
 			}
 		}
 	}
 	// Only close the window when something was processed: a broken query returning 0 issues must not swallow the backlog.
 	if len(issues) > 0 {
 		if err := e.State.SetCursor(ctx, job.ID, start.UTC().Format(time.RFC3339Nano)); err != nil {
-			log.Printf("syncer: job %d: save cursor: %v", job.ID, err)
+			lg.Error("save cursor", "err", err)
 		}
 	}
 	return out
@@ -149,7 +187,7 @@ func (r *run) detect(ctx context.Context, since string) ([]jira.Issue, error) {
 			return nil, err
 		}
 		if len(all) > 0 {
-			log.Printf("syncer: job %d: assignee filter matched 0 of %d issues; check the Jira account can resolve %q", r.job.ID, len(all), assignees)
+			slog.Warn("assignee filter matched nothing; refetched without it", "job", r.job.ID, "unfiltered", len(all), "assignees", assignees)
 			issues = all
 		}
 	}
