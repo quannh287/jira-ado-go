@@ -36,8 +36,14 @@ func (a *App) settingsPage(c *ui.Context) {
 							ui.Segmented(c.Key("theme"), &mode, "System", "Light", "Dark").Label("Theme").
 								OnChange(func() { a.store.SetSetting(setTheme, themeModes[mode]) })
 						}).Description("The content area; the sidebar is always dark.")
-						ui.Field(c, "App icon", func() { a.appIconPicker(c) }).
-							Description("The Dock icon while the app runs; Finder keeps the packaged icon.")
+						// Description on the icons' line, as switchField does, so the label centres on them.
+						ui.Field(c, "App icon", func() {
+							ui.Row(c).Gap(16).AlignItems(ui.Center).Children(func() {
+								a.appIconPicker(c)
+								ui.Text(c, appicon.Get(a.store.Settings[setAppIcon]).Name+": the Dock icon while the app runs; Finder keeps the packaged icon.").
+									FontSize(12).TextColor(t.TextMuted).Grow(1).MinWidth(0)
+							})
+						})
 					})
 					ui.Fieldset(c, "Notifications", func() {
 						mode := max(slices.Index(notifyModes, a.notifyMode()), 0)
@@ -60,9 +66,8 @@ func (a *App) settingsPage(c *ui.Context) {
 					ui.Fieldset(c, "Azure DevOps", func() {
 						kv(c, "Organization", a.store.Settings[setADOOrg])
 						kv(c, "Signed in as", a.store.Settings[setADOUser])
-						ui.Field(c, "Remember PAT", func() {
-							ui.Switch(c.Key("remember"), &a.remember).OnChange(a.toggleRemember)
-						}).Description("Keep the PAT in the macOS Keychain across launches. Off removes it; you stay signed in until you quit.")
+						switchField(c, "Remember PAT", "remember", &a.remember,
+							"Keep the PAT in the macOS Keychain across launches. Off removes it; you stay signed in until you quit.").OnChange(a.toggleRemember)
 						ui.Field(c, "Jira key field", func() {
 							ui.TextInput(c.Key("keyfield"), &f.keyField).Placeholder(syncjob.DefaultJiraKeyField)
 						}).Description("ADO field holding \"KEY - id\"; the sync finds existing work items by it.")
@@ -119,12 +124,12 @@ func (a *App) appIconPicker(c *ui.Context) {
 			if o.ID == icon {
 				ring = t.Accent
 			}
-			ui.RadioBase(c.Key("icon-"+o.ID), &icon, o.ID).Label(o.Name).Column().Gap(6).AlignItems(ui.Center).
-				Cursor(ui.CursorPointer).OnChange(func() { a.setAppIcon(icon) }).Children(func() {
+			// No caption: a text in the control would pull the form label down to its line; the name is the tooltip.
+			ui.RadioBase(c.Key("icon-"+o.ID), &icon, o.ID).Label(o.Name).Tooltip(o.Name).Cursor(ui.CursorPointer).
+				OnChange(func() { a.setAppIcon(icon) }).Children(func() {
 				ui.Column(c).Padding(3).Radius(16).Border(2, ring).Children(func() {
 					ui.Image(c, iconThumbs()[i]).Size(56, 56)
 				})
-				ui.Text(c, o.Name).FontSize(12).TextColor(t.TextMuted)
 			})
 		}
 	}).Row().Gap(16).Label("App icon")

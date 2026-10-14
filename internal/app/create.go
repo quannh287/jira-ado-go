@@ -289,10 +289,8 @@ func (a *App) stepFilters(c *ui.Context) {
 	t := c.Theme()
 	f := &a.draft.job.Filters
 	ui.Form(c, func() {
-		ui.Field(c, "Sync comments", func() { ui.Switch(c.Key("comments"), &f.SyncComments) }).
-			Description("Copy Jira comments to the ADO discussion; edits patch the same comment.")
-		ui.Field(c, "User filter", func() { ui.Switch(c.Key("userfilter"), &f.UserFilter) }).
-			Description("Only sync issues whose assignee is listed below, or, with no list, maps to an ADO email.")
+		switchField(c, "Sync comments", "comments", &f.SyncComments, "Copy Jira comments to the ADO discussion; edits patch the same comment.")
+		switchField(c, "User filter", "userfilter", &f.UserFilter, "Only sync issues whose assignee is listed below, or, with no list, maps to an ADO email.")
 		if f.UserFilter {
 			ui.Field(c, "Assignees", func() {
 				ui.TextInput(c.Key("assignees"), &f.Assignees).Placeholder("Mapped users")

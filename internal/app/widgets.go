@@ -203,3 +203,17 @@ func emptyHint(c *ui.Context, svg *ui.SVG, title string, hints ...[2]string) {
 		}
 	})
 }
+
+// switchField is a form field whose switch and description share one line, so the label lines up with the switch;
+// a Field description below a switch drops the label to the description's line. It returns the switch, for OnChange.
+func switchField(c *ui.Context, label, key string, on *bool, desc string) ui.Element {
+	t := c.Theme()
+	var sw ui.Element
+	ui.Field(c, label, func() {
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			sw = ui.Switch(c.Key(key), on)
+			ui.Text(c, desc).FontSize(12).TextColor(t.TextMuted).Grow(1).MinWidth(0)
+		})
+	})
+	return sw
+}
