@@ -10,6 +10,9 @@ import (
 	"jira-ado/internal/syncjob"
 )
 
+// liveRun is the ?run= value of the run in flight.
+const liveRun = "live"
+
 func (a *App) reportPage(c *ui.Context, jobID int) {
 	t := c.Theme()
 	j := a.store.Job(jobID)
@@ -17,25 +20,41 @@ func (a *App) reportPage(c *ui.Context, jobID int) {
 		emptyState(c, "Job not found", fmt.Sprintf("No job with ID %d.", jobID))
 		return
 	}
-	runs := a.store.RunsFor(jobID)
-	if len(runs) == 0 {
+	type entry struct {
+		run  syncjob.Run
+		live *syncjob.Progress
+	}
+	var entries []entry
+	if p, ok := a.live[jobID]; ok {
+		entries = append(entries, entry{p.Run, &p})
+	}
+	for _, r := range a.store.RunsFor(jobID) {
+		entries = append(entries, entry{run: r})
+	}
+	if len(entries) == 0 {
 		page(c, j.Name+" · Report", "", nil, func() { emptyState(c, "No runs yet", "Press Sync Now on the job page.") })
 		return
 	}
-	cur := 0
-	want := atoi(a.router.Query("run"))
-	for i, r := range runs {
-		if r.ID == want {
+	cur := 0 // the live run when there is one, else the newest
+	q := a.router.Query("run")
+	for i, e := range entries {
+		if (q == liveRun && e.live != nil) || (e.live == nil && fmt.Sprint(e.run.ID) == q) {
 			cur = i
 		}
 	}
 	st := a.table("report")
 	st.sel = cur
-	st.list.Key = func(i int) any { return runs[i].ID }
+	st.list.Key = func(i int) any {
+		if entries[i].live != nil {
+			return liveRun
+		}
+		return entries[i].run.ID
+	}
 
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
-		list := ui.List(c.Key("runs"), &st.list, len(runs), func(i int) {
-			r := runs[i]
+		list := ui.List(c.Key("runs"), &st.list, len(entries), func(i int) {
+			e := entries[i]
+			r := e.run
 			// On the accent-coloured chosen row, status colours and muted text vanish; use the accent's text colour.
 			muted, status := t.TextMuted, runStatusColor(t, r.Status())
 			if i == st.sel {
@@ -43,36 +62,74 @@ func (a *App) reportPage(c *ui.Context, jobID int) {
 			}
 			ui.Column(c).Padding(8, 12).Gap(2).Children(func() {
 				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					if e.live != nil {
+						ui.Text(c, "Live").Bold().Grow(1)
+						ui.Spinner(c).Label("Syncing").TextColor(muted)
+						return
+					}
 					ui.Textf(c, "Run #%d", r.ID).Bold().Grow(1)
 					pill(c, string(r.Status()), status)
 				})
-				ui.Text(c, r.Started.Format("Jan 2 15:04:05")+" · "+ago(r.Started, a.now())).FontSize(11).TextColor(muted)
+				sub := r.Started.Format("Jan 2 15:04:05") + " · " + ago(r.Started, a.now())
+				if e.live != nil {
+					sub = progressText(*e.live)
+				}
+				ui.Text(c, sub).FontSize(11).TextColor(muted)
 			})
 		}).Width(260).Shrink(0).Label("Runs")
-		if list.Changed() && st.sel >= 0 && st.sel < len(runs) {
-			a.router.Replace(fmt.Sprintf("/jobs/%d/report?run=%d", jobID, runs[st.sel].ID))
+		if list.Changed() && st.sel >= 0 && st.sel < len(entries) {
+			run := fmt.Sprint(entries[st.sel].run.ID)
+			if entries[st.sel].live != nil {
+				run = liveRun
+			}
+			a.router.Replace(fmt.Sprintf("/jobs/%d/report?run=%s", jobID, run))
 		}
 		ui.Box(c).Width(1).Background(t.Border)
-		a.runDetail(c, j, runs[cur])
+		a.runDetail(c, j, entries[cur].run, entries[cur].live)
 	})
 }
 
-func (a *App) runDetail(c *ui.Context, j *syncjob.Job, r syncjob.Run) {
+// progressText is "12 of 71 issues" once Jira answered, "Searching Jira…" before.
+func progressText(p syncjob.Progress) string {
+	if p.Total == 0 {
+		return "Searching Jira…"
+	}
+	return fmt.Sprintf("%d of %d issues", p.Done, p.Total)
+}
+
+// runDetail shows a saved run, or with p the run in flight, which redraws as its snapshots arrive.
+func (a *App) runDetail(c *ui.Context, j *syncjob.Job, r syncjob.Run, p *syncjob.Progress) {
 	t := c.Theme()
 	ui.Scroll(c).Grow(1).MinWidth(0).Children(func() {
 		ui.Column(c).Padding(20, 24).Gap(16).Children(func() {
 			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 				ui.Column(c).Grow(1).Gap(2).Children(func() {
-					ui.Textf(c, "%s · Run #%d", j.Name, r.ID).FontSize(18).Bold()
 					since := "full backlog"
 					if r.Since != "" {
 						since = "since " + r.Since
 					}
+					if p != nil {
+						ui.Textf(c, "%s · Syncing", j.Name).FontSize(18).Bold()
+						ui.Text(c, fmt.Sprintf("started %s · %s · %s", r.Started.Format("15:04:05"), progressText(*p), since)).FontSize(12).TextColor(t.TextMuted)
+						return
+					}
+					ui.Textf(c, "%s · Run #%d", j.Name, r.ID).FontSize(18).Bold()
 					ui.Text(c, fmt.Sprintf("%s · took %s · %d tickets · %s", r.Started.Format("Mon Jan 2 15:04:05"), fmtDuration(r.Duration), len(r.Tickets), since)).
 						FontSize(12).TextColor(t.TextMuted)
 				})
-				pill(c, string(r.Status()), runStatusColor(t, r.Status()))
+				if p != nil {
+					ui.Spinner(c).Label("Syncing")
+				} else {
+					pill(c, string(r.Status()), runStatusColor(t, r.Status()))
+				}
 			})
+			if p != nil {
+				frac := -1.0 // indeterminate until Jira says how many issues there are
+				if p.Total > 0 {
+					frac = float64(p.Done) / float64(p.Total)
+				}
+				ui.Progress(c, frac).Label("Sync progress")
+			}
 			if r.Error != "" {
 				ui.Text(c, r.Error).TextColor(t.Danger).Selectable().Padding(10, 12).Radius(8).Background(t.Danger.Alpha(0.1))
 			}

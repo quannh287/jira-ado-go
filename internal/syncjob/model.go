@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -225,7 +226,21 @@ type Engine interface {
 	ValidatePAT(ctx context.Context, org, pat string) (string, error)
 	// CheckJira checks the Jira credentials and returns the account's display name.
 	CheckJira(ctx context.Context, conn Connection) (string, error)
-	Sync(ctx context.Context, conn Connection, j Job) Run
+	// Sync runs one job; onProgress, if set, gets a snapshot after detection and after every issue, on the worker goroutine.
+	Sync(ctx context.Context, conn Connection, j Job, onProgress func(Progress)) Run
+}
+
+// Progress is a snapshot of a run in flight.
+type Progress struct {
+	Run   Run // Tickets so far; ID is 0 until the run is saved
+	Done  int
+	Total int // issues detected; 0 while still searching Jira
+}
+
+// Snapshot copies r so a progress callback can hand it to another goroutine.
+func (r Run) Snapshot() Run {
+	r.Tickets = slices.Clone(r.Tickets)
+	return r
 }
 
 // State is what a sync persists while it runs; implementations must be safe off the UI thread.

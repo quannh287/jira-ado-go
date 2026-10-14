@@ -4,6 +4,7 @@ package app
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -45,6 +46,8 @@ const (
 type App struct {
 	// Async runs work off the UI thread, then done on it; the default runs both inline, for tests.
 	Async func(work, done func())
+	// Post runs fn on the UI thread from any goroutine (Window.Update); inline by default, for tests.
+	Post func(fn func())
 	// LogPath is the diagnostic log file, shown in Settings so a problem can be traced.
 	LogPath string
 
@@ -67,6 +70,7 @@ type App struct {
 	query     string
 	draft     draft
 	running   map[int]bool
+	live      map[int]syncjob.Progress // the run in flight per job, for the live report
 	jobTab    int
 	opened    map[string]*bool
 	confirm   bool
@@ -85,6 +89,8 @@ type table struct {
 func New(engine syncjob.Engine, store *syncjob.Store, secrets Keys, now func() time.Time) *App {
 	a := &App{
 		Async:    func(work, done func()) { work(); done() },
+		Post:     func(fn func()) { fn() },
+		live:     map[int]syncjob.Progress{},
 		engine:   engine,
 		store:    store,
 		now:      now,
@@ -242,19 +248,33 @@ func (a *App) syncNow(id int) {
 	}
 	conn := a.connection() // an incomplete one comes back as a failed run naming what's missing
 	a.running[id] = true
+	a.live[id] = syncjob.Progress{Run: syncjob.Run{JobID: id, Started: a.now()}}
 	a.store.Log(id, "Sync started")
 	job := *j // copied on the UI thread; the worker never touches App state
+	// Snapshots arrive on the worker; Post hands them to the UI thread, which redraws the live report.
+	onProgress := func(p syncjob.Progress) {
+		a.Post(func() {
+			if a.running[id] { // a late snapshot after done must not resurrect the live run
+				a.live[id] = p
+			}
+		})
+	}
 	var run syncjob.Run
 	a.Async(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
 		defer cancel()
-		run = a.engine.Sync(ctx, conn, job)
+		run = a.engine.Sync(ctx, conn, job, onProgress)
 	}, func() {
 		delete(a.running, id)
+		delete(a.live, id)
 		if a.store.Job(id) == nil {
 			return // deleted while syncing
 		}
-		a.store.AddRun(run)
+		rid := a.store.AddRun(run)
+		// Someone watching the live run now sees the saved one in its place.
+		if a.router.Path() == fmt.Sprintf("/jobs/%d/report", id) && a.router.Query("run") == liveRun {
+			a.router.Replace(fmt.Sprintf("/jobs/%d/report?run=%d", id, rid))
+		}
 		summary := fmtRunSummary(run)
 		if run.Error != "" {
 			summary = "failed: " + run.Error

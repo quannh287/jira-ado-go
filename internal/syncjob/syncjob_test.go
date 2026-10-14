@@ -78,7 +78,7 @@ func TestFake(t *testing.T) {
 		t.Fatal("short PAT accepted")
 	}
 	j := Job{ID: 1, JiraKey: "SE", ADOProject: "kai", Mappings: SmartDefaults(), Filters: DefaultFilters()}
-	r := f.Sync(context.Background(), Connection{}, j)
+	r := f.Sync(context.Background(), Connection{}, j, nil)
 	if len(r.Tickets) < 3 || r.JobID != 1 {
 		t.Fatalf("run = %+v", r)
 	}
@@ -105,7 +105,7 @@ func TestSQLiteRoundTrip(t *testing.T) {
 	Seed(s, NewFake(0, clock), t0)
 	keep := s.AddJob(Job{Name: "keep", JiraKey: "K", ADOProject: "p", Type: Webhook, Mappings: SmartDefaults(),
 		Filters: Filters{Users: []UserPair{{Jira: "a", ADOEmail: "a@x"}}}})
-	s.AddRun(NewFake(0, clock).Sync(context.Background(), Connection{}, *s.Job(keep)))
+	s.AddRun(NewFake(0, clock).Sync(context.Background(), Connection{}, *s.Job(keep), nil))
 	s.SetStatus(keep, Paused)
 	s.DeleteJob(1)
 	s.DeleteRuns(s.Runs[len(s.Runs)-1].ID)

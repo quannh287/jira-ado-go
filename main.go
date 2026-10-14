@@ -76,6 +76,7 @@ func main() {
 		})
 		appicon.SetIcon = mygo.App.Dock.SetIcon
 		appicon.Apply(store.Settings[appicon.SettingKey])
+		a.Post = win.Update
 		a.Async = func(work, done func()) {
 			go func() {
 				// A panic in background work is logged with its stack; done still runs so the UI leaves its busy state.

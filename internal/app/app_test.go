@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -221,5 +222,41 @@ func TestEditJob(t *testing.T) {
 	}
 	if last := j.Activity[len(j.Activity)-1].Text; last != "Job settings changed" {
 		t.Fatalf("activity %q", last)
+	}
+}
+
+// progressEngine reports one snapshot mid-run.
+type progressEngine struct{ syncjob.Fake }
+
+func (e *progressEngine) Sync(ctx context.Context, conn syncjob.Connection, j syncjob.Job, onProgress func(syncjob.Progress)) syncjob.Run {
+	run := syncjob.Run{JobID: j.ID, Started: time.Now(), Tickets: []syncjob.Ticket{{Key: "CAT-1", Summary: "first", Outcome: syncjob.Updated}}}
+	onProgress(syncjob.Progress{Run: run.Snapshot(), Done: 1, Total: 3})
+	return run
+}
+
+func TestLiveReport(t *testing.T) {
+	a, tt := newTestApp()
+	a.pat = "abcdefghijklmnopqrstuvwxyz0123456789"
+	a.router.Transition = ui.TransitionNone
+	a.engine = &progressEngine{}
+	var work, done func()
+	a.Async = func(w, d func()) { work, done = w, d } // the test decides when the worker runs and finishes
+	id := a.store.AddJob(syncjob.Job{Name: "CAT", JiraKey: "CAT", ADOProject: "Tickets", Filters: syncjob.DefaultFilters()})
+	a.router.Push(fmt.Sprintf("/jobs/%d", id))
+	tt.Frame()
+	must(t, tt.Click("Sync Now"))
+	work() // snapshot posted: 1 of 3
+	tt.Frame()
+	if !tt.HasText("1 of 3 issues") {
+		t.Fatalf("job page progress: %q", tt.Texts())
+	}
+	must(t, tt.Click("View Report"))
+	if a.router.Query("run") != liveRun || !tt.HasText("Live") || !tt.HasText("CAT-1") || !tt.HasText("CAT · Syncing") {
+		t.Fatalf("live report: query %q texts %q", a.router.Query("run"), tt.Texts())
+	}
+	done()
+	tt.Frame()
+	if q := a.router.Query("run"); q != fmt.Sprint(a.store.Runs[0].ID) || tt.HasText("Live") {
+		t.Fatalf("after the run: query %q texts %q", q, tt.Texts())
 	}
 }

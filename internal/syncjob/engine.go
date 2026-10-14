@@ -42,14 +42,26 @@ func (f *Fake) CheckJira(ctx context.Context, conn Connection) (string, error) {
 	return "Demo Jira User", f.wait(ctx)
 }
 
-func (f *Fake) Sync(ctx context.Context, _ Connection, j Job) Run {
+func (f *Fake) Sync(ctx context.Context, _ Connection, j Job, onProgress func(Progress)) Run {
 	start := f.Now()
-	_ = f.wait(ctx)
-	run := Run{JobID: j.ID, Started: start, Duration: f.Now().Sub(start)}
+	run := Run{JobID: j.ID, Started: start}
 	area, iteration := j.Paths(start)
-	for i := range 3 + f.rnd.IntN(6) {
-		run.Tickets = append(run.Tickets, f.ticket(j, i+1, area, iteration))
+	n := 3 + f.rnd.IntN(6)
+	report := func() {
+		if onProgress != nil {
+			onProgress(Progress{Run: run.Snapshot(), Done: len(run.Tickets), Total: n})
+		}
 	}
+	report()
+	for i := range n {
+		if err := f.waitFor(ctx, f.Delay/time.Duration(n)); err != nil {
+			run.Error = err.Error()
+			break
+		}
+		run.Tickets = append(run.Tickets, f.ticket(j, i+1, area, iteration))
+		report()
+	}
+	run.Duration = f.Now().Sub(start)
 	return run
 }
 
@@ -98,12 +110,14 @@ func patchOps(fields map[string]string) []map[string]string {
 	return ops
 }
 
-func (f *Fake) wait(ctx context.Context) error {
-	if f.Delay == 0 {
+func (f *Fake) wait(ctx context.Context) error { return f.waitFor(ctx, f.Delay) }
+
+func (f *Fake) waitFor(ctx context.Context, d time.Duration) error {
+	if d == 0 {
 		return nil
 	}
 	select {
-	case <-time.After(f.Delay):
+	case <-time.After(d):
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

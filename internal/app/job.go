@@ -23,13 +23,17 @@ func (a *App) jobPage(c *ui.Context, id int) {
 	page(c, j.Name, sub, func() {
 		if running {
 			ui.Spinner(c).Label("Syncing")
-			ui.Text(c, "Syncing…").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, progressText(a.live[id])).FontSize(12).TextColor(t.TextMuted)
 		} else {
 			pill(c, string(j.Status), jobStatusColor(t, j.Status))
 		}
 		last, hasRun := a.store.LastRun(id)
 		ui.Button(c.Key("edit"), "Edit Job").OnClick(func() { a.openEditor(id, 0) })
-		ui.Button(c.Key("report"), "View Report").Disabled(!hasRun).OnClick(func() {
+		ui.Button(c.Key("report"), "View Report").Disabled(!hasRun && !running).OnClick(func() {
+			if running {
+				a.router.Push(fmt.Sprintf("/jobs/%d/report?run=%s", id, liveRun)) // watch it as it goes
+				return
+			}
 			a.router.Push(fmt.Sprintf("/jobs/%d/report?run=%d", id, last.ID))
 		})
 		if j.Status == syncjob.Active {

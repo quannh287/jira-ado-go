@@ -84,7 +84,7 @@ type run struct {
 	sprintField string
 }
 
-func (e *Engine) Sync(ctx context.Context, conn syncjob.Connection, job syncjob.Job) (out syncjob.Run) {
+func (e *Engine) Sync(ctx context.Context, conn syncjob.Connection, job syncjob.Job, onProgress func(syncjob.Progress)) (out syncjob.Run) {
 	start := e.Now()
 	out = syncjob.Run{JobID: job.ID, Started: start}
 	// run ties every log line of this sync together; the run's DB id isn't known until the UI saves it.
@@ -141,6 +141,12 @@ func (e *Engine) Sync(ctx context.Context, conn syncjob.Connection, job syncjob.
 	}
 	lg.Info("issues detected", "count", len(issues), "since", since, "first_run", r.firstRun)
 
+	report := func() {
+		if onProgress != nil {
+			onProgress(syncjob.Progress{Run: out.Snapshot(), Done: len(out.Tickets), Total: len(issues)})
+		}
+	}
+	report()
 	cp := newCheckpoint(issues)
 	for _, is := range issues {
 		if ctx.Err() != nil {
@@ -149,6 +155,7 @@ func (e *Engine) Sync(ctx context.Context, conn syncjob.Connection, job syncjob.
 		}
 		t := r.process(ctx, is)
 		out.Tickets = append(out.Tickets, t)
+		report()
 		if t.Outcome == syncjob.Failed {
 			lg.Warn("ticket failed", "key", t.Key, "ado_id", t.ADOID, "type", t.WorkItemType, "err", t.Error)
 		} else if strings.Contains(t.Message, " · ") { // attachment/comment warnings
