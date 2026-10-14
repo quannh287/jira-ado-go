@@ -6,25 +6,44 @@ A native desktop app that syncs Jira issues into Azure DevOps work items, one wa
 
 ## Features
 
-- **Sync jobs**: each job pairs one Jira project with one ADO project. It runs on demand with **Sync Now**, and you can pause and resume it.
-- **Incremental sync**: each job keeps a cursor, so a run only fetches issues updated since the last one. The first run imports the whole backlog. Progress is checkpointed after every issue, so a stopped run resumes where it left off.
-- **Faithful mapping**:
-  - Issues become Product Backlog Items; sub-tasks become Tasks, linked under their parent.
-  - Priority, state, dates and time tracking are converted to the ADO equivalents.
-  - Descriptions are converted from Jira's format to HTML.
-  - Comments are copied, and editing one in Jira updates the same ADO comment.
-  - Attachments are copied.
-- **Sprints follow Jira**: an issue in an active Jira sprint goes to the current ADO sprint. Any other issue, including one taken out of its sprint, goes to the backlog (the sprint root path). Alternatively, every issue can go to one fixed iteration.
-- **ADO stays in charge**: items that are Done in ADO are never overwritten; the change is added as a comment instead. On a job's first run, which imports the whole backlog, no comment is added. Estimates and dates already filled in ADO are kept, and the differences are commented.
-- **Safe runs**: each sync first checks that its area and iteration paths exist in ADO, and stops before writing if one doesn't. **Dry Run** shows what a sync would send without writing anything. **Cancel** stops a run; the next sync resumes from the last checkpoint. **Retry failed** reruns only a run's failed tickets.
-- **Mappings**: one shared user mapping for every job, and editable rules for issue type → work item type, status → state and priority. The defaults are the original app's rules.
-- **Report**: for every run you can see what was written to each work item, with links to Jira and ADO. Every ADO API call is logged and can be expanded when you need to debug.
-- **Logs**: all runs across jobs, with filters, JSON export and bulk delete.
-- **Local and private**: jobs and history are stored in SQLite on your machine. The ADO PAT and the Jira token are stored in the OS keychain.
+### Set up once
+- **Sign in with your ADO PAT.** It's kept in the macOS Keychain (or Windows Credential Manager), so you stay signed in. The Jira API token is stored there too, never in a file.
+- **Create a sync job in 4 steps.** Pick the Jira project and the ADO project, choose which fields to copy (**Smart Defaults** picks them all), set filters, and review before saving.
+- **Edit a job any time.** Change its fields, filters, area path or sprint settings with **Edit Job**, or jump straight to a step from the job's tabs.
+- **Check before you sync.** **Check in ADO** confirms the area path and sprint exist, so a typo doesn't fail every ticket.
+
+### What a sync does
+- **Copies Jira issues into ADO work items.** Stories become Product Backlog Items, sub-tasks become Tasks linked under their parent. Title, description, state, priority, assignee, dates and time tracking come along.
+- **Keeps comments and attachments in step.** New Jira comments are added, edited ones are updated in place, and attachments are copied.
+- **Only touches what changed.** Each run picks up where the last one stopped. Work items that are already up to date aren't rewritten, so ADO gets no needless revisions or notifications.
+- **Puts work in the right sprint.** An issue in the active Jira sprint goes to this week's ADO sprint. Anything else goes to the backlog, including issues taken out of a sprint.
+- **Respects ADO.** A work item that is Done in ADO is never overwritten; the Jira change is left as a comment. Estimates and dates someone filled in ADO are kept, and differences are commented. Files attached in ADO are not removed.
+- **Filters by person.** Sync only issues assigned to chosen people, and map Jira users to their ADO emails.
+
+### Run it your way
+- **Sync Now** for a real run, or **Dry Run** to see exactly what would be sent without changing anything in ADO.
+- **Watch it live.** The report fills in ticket by ticket while the sync runs, with a progress bar.
+- **Cancel** a run safely. The next sync continues from where it stopped.
+- **Retry failed** reruns only the tickets that failed, without re-reading everything else.
+- **Get notified** when a run ends, every time or only on failures. Click the notification to open that run's report.
+
+### See what happened
+- **Run report.** Created, updated, skipped and failed counts, then every ticket with what was written to ADO, with links to open it in Jira and in ADO. Sub-tasks are grouped under their parent.
+- **Error details when you need them.** Each ticket's ADO requests and responses are one click away, folded by default.
+- **Logs.** Every run of every job, filtered by job and status, exportable as JSON, deletable one by one or in bulk.
+- **Diagnostic log file.** Errors and crashes are written to a log you can open from **Settings → Diagnostics**, so problems can be traced. It never contains tokens.
+
+### Shared rules
+- **Mappings page.** One list of Jira user → ADO email for every job, plus the rules for issue type → work item type, Jira status → ADO state and priority. Choose values from drop-downs loaded from your Jira and ADO projects.
+
+### Feels native
+- **macOS-style window**: a dark floating sidebar, light, dark or system theme for the content, and **⌘K** to jump to any page or job.
+- **Pick the app icon** from three designs.
+- **Your data stays on your machine** in a local database. It runs on macOS, Windows and Linux.
 
 ## Install
 
-Download a build from **Actions** (the artifacts of the latest run) or from a release.
+Download the latest build from the repository's **Releases** page.
 
 | OS | File | Note |
 |---|---|---|
