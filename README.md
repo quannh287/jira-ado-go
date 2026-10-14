@@ -29,7 +29,7 @@ A native macOS app that syncs Jira issues into Azure DevOps work items, one way 
 - **Cancel** a run safely. The next sync continues from where it stopped.
 - **Retry failed** reruns only the tickets that failed, without re-reading everything else.
 - **Get notified** when a run ends: every run, failures only, or off. Click the notification to open that run's report.
-- **Dock badge** counts jobs whose last run didn't fully succeed.
+- **Menu bar icon** shows a sync in progress or how many jobs are failing, with each job's state, Sync Now, Open and New Sync Job. It replaces the Dock icon; turn it off in Settings to use the Dock (with a badge counting failing jobs) instead.
 
 ### See what happened
 - **Run report.** Created, updated, skipped and failed counts, then every ticket with what was written to ADO, with links to open it in Jira and in ADO. Sub-tasks are grouped under their parent.
@@ -42,7 +42,7 @@ A native macOS app that syncs Jira issues into Azure DevOps work items, one way 
 
 ### Getting around
 - **⌘N** starts a new sync job; **⌘K** searches pages and jobs.
-- **Appearance** in Settings: System, Light or Dark theme, and a choice of three Dock icons.
+- **Appearance** in Settings: System, Light or Dark theme, a choice of three Dock icons (used when the menu bar icon is off), and the menu bar switch.
 
 ## Install
 

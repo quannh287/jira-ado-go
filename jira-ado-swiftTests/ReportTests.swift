@@ -78,7 +78,7 @@ import Testing
     var j = Job(type: .scheduler)
     j.filters.everyMinutes = 180
     #expect(syncTypeLabel(j) == "Scheduler · every 3 hours")
-    #expect(syncTypeLabel(Job(type: .webhook)) == "Webhook")
+    #expect(syncTypeLabel(Job(type: .manual)) == "Manual")
 }
 
 @Test func notificationIDs() {

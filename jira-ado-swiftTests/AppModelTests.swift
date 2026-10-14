@@ -275,6 +275,39 @@ struct Harness {
         #expect(ui.engine is FakeEngine && ui.setting(Setting.adoOrg) == "demo-org")
     }
 
+    @Test func menuBarStatus() async {
+        let h = Harness()
+        #expect(h.model.menuStatus == AppModel.MenuStatus(symbol: "checkmark.circle", title: "No runs yet"))
+        #expect(h.model.menuLine(h.model.store.job(h.jobID)!) == "Mobile — never run")
+
+        h.engine.block = true
+        let task = h.model.syncNow(h.jobID)
+        await Task.yield()
+        #expect(h.model.menuStatus.title == "Syncing Mobile" && h.model.menuStatus.symbol == "arrow.triangle.2.circlepath")
+        #expect(h.model.menuLine(h.model.store.job(h.jobID)!) == "Mobile — 0 of 1 issues")
+        h.engine.gate?.resume()
+        await task?.value
+        #expect(h.model.menuStatus.title == "Last run OK · just now" && h.model.menuStatus.failing == 0)
+        #expect(h.model.menuLine(h.model.store.job(h.jobID)!) == "Mobile — OK just now")
+
+        h.engine.block = false
+        h.engine.tickets = [Ticket(key: "SE-9", outcome: .failed)]
+        await h.model.syncNow(h.jobID)?.value
+        #expect(h.model.menuStatus == AppModel.MenuStatus(symbol: "exclamationmark.triangle", title: "1 job failing", failing: 1))
+        #expect(h.model.menuLine(h.model.store.job(h.jobID)!) == "Mobile — partial just now")
+        h.model.store.setStatus(h.jobID, .paused)
+        #expect(h.model.menuLine(h.model.store.job(h.jobID)!) == "Mobile — paused")
+    }
+
+    @Test func menuBarSetting() {
+        let h = Harness()
+        #expect(h.model.showsMenuBar, "on by default")
+        h.model.setMenuBar(false)
+        #expect(!h.model.showsMenuBar && h.model.setting(Setting.menuBar) == "off")
+        h.model.setMenuBar(true)
+        #expect(h.model.showsMenuBar)
+    }
+
     @Test func appIconOptions() {
         #expect(AppIconOption.get(nil).id == AppIconOption.defaultID && AppIconOption.get("lanes").name == "Lane change")
         #expect(AppIconOption.all.allSatisfy { $0.image != nil }, "every icon is in the asset catalog")

@@ -40,6 +40,10 @@ struct SettingsView: View {
                     }
                 }
                 Text("The Dock icon while the app runs; Finder keeps the packaged icon.").font(.callout).foregroundStyle(.secondary)
+                Toggle("Show in menu bar", isOn: Binding(get: { model.showsMenuBar }, set: { model.setMenuBar($0) }))
+                    .accessibilityIdentifier("settings.menuBar")
+                Text("The menu bar icon shows syncs and failures and replaces the Dock icon. Off: the app sits in the Dock and ⌘Tab instead.")
+                    .font(.callout).foregroundStyle(.secondary)
             }
             Section("Notifications") {
                 Picker("When a run ends", selection: Binding(get: { model.notifyMode }, set: { model.store.setSetting(Setting.notify, $0.rawValue) })) {

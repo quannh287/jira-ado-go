@@ -137,6 +137,7 @@ final class AppModel {
     /// Called once the app has launched: Dock icon, secrets, scheduler.
     func start() {
         applyAppIcon()
+        applyActivationPolicy()
         Task {
             await loadSecrets()
             tick()
@@ -350,6 +351,51 @@ final class AppModel {
     /// The Dock badge counts jobs whose last run didn't fully succeed.
     func updateBadge() {
         badge(store.jobs.filter { store.lastRun($0.id).map { $0.status != .success } ?? false }.count)
+    }
+
+    // MARK: Menu bar
+
+    /// The menu bar icon replaces the Dock icon; on by default.
+    var showsMenuBar: Bool { setting(Setting.menuBar) != "off" }
+
+    func setMenuBar(_ on: Bool) {
+        store.setSetting(Setting.menuBar, on ? "on" : "off")
+        applyActivationPolicy()
+    }
+
+    /// A menu bar app has no Dock icon and isn't in ⌘Tab; turning it off brings both back.
+    private func applyActivationPolicy() {
+        guard let app = NSApp else { return }
+        app.setActivationPolicy(showsMenuBar ? .accessory : .regular)
+        app.activate()
+    }
+
+    /// What the menu bar icon says: syncing, failing jobs, or all fine.
+    struct MenuStatus: Equatable {
+        var symbol: String
+        var title: String
+        var failing = 0
+    }
+
+    var menuStatus: MenuStatus {
+        if !running.isEmpty {
+            let names = store.jobs.filter { running.contains($0.id) }.map(\.name)
+            return MenuStatus(symbol: "arrow.triangle.2.circlepath", title: "Syncing " + names.joined(separator: ", "))
+        }
+        let failing = store.jobs.filter { store.lastRun($0.id).map { $0.status != .success } ?? false }.count
+        if failing > 0 {
+            return MenuStatus(symbol: "exclamationmark.triangle", title: failing == 1 ? "1 job failing" : "\(failing) jobs failing", failing: failing)
+        }
+        guard let last = store.runs.first(where: { $0.kind != .dryRun }) else { return MenuStatus(symbol: "checkmark.circle", title: "No runs yet") }
+        return MenuStatus(symbol: "checkmark.circle", title: "Last run OK · " + ago(last.started, now()))
+    }
+
+    /// One line per job for the menu: its state now, or how its last run went.
+    func menuLine(_ j: Job) -> String {
+        if running.contains(j.id) { return "\(j.name) — " + (live[j.id].map(progressText) ?? "syncing") }
+        if j.status == .paused { return "\(j.name) — paused" }
+        guard let r = store.lastRun(j.id) else { return "\(j.name) — never run" }
+        return "\(j.name) — \(r.status == .success ? "OK" : r.status.rawValue) \(ago(r.started, now()))"
     }
 
     // MARK: Notifications

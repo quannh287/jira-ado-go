@@ -20,7 +20,7 @@ enum PreviewData {
         webFilters.iteration = #"kai-web\Sprint 42"#
         webFilters.everyMinutes = 180
         let web = store.addJob(job("Web platform stories", "WEB", "kai-web", .scheduler, filters: webFilters))
-        let support = store.addJob(job("Support escalations", "SUP", "kai-support", .webhook))
+        let support = store.addJob(job("Support escalations", "SUP", "kai-support", .manual))
         store.setStatus(support, .paused)
         store.addRun(run(web, hoursAgo: 30, [ticket("WEB-12", "Sprint report export is empty", .updated, id: 3012)]))
         store.addRun(run(mobile, hoursAgo: 26, [ticket("SE-101", "Login button unresponsive on Android", .created, id: 4101)], kind: .dryRun))

@@ -27,6 +27,12 @@ struct JiraADOApp: App {
                     .disabled(model.pat.isEmpty)
             }
         }
+        // ⌘-dragging the icon out of the menu bar turns it off, which brings the Dock icon back.
+        MenuBarExtra(isInserted: Binding(get: { model.showsMenuBar }, set: { model.setMenuBar($0) })) {
+            MenuBarMenu().environment(model)
+        } label: {
+            MenuBarLabel().environment(model)
+        }
     }
 
     private var colorScheme: ColorScheme? {

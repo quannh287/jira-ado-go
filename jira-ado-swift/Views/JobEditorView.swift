@@ -105,8 +105,7 @@ struct JobEditorView: View {
         }
         .pickerStyle(.radioGroup)
         .horizontalRadioGroupLayout()
-        Text(["Manual": "Runs only when you press Sync Now.", "Scheduler": "Runs on a schedule.",
-              "Webhook": "Runs when Jira sends an issue event."][job.type.rawValue] ?? "")
+        Text(["Manual": "Runs only when you press Sync Now.", "Scheduler": "Runs on a schedule."][job.type.rawValue] ?? "")
             .font(.callout).foregroundStyle(.secondary)
         if job.type == .scheduler {
             Picker("Run every", selection: Binding(get: { Int(job.filters.every / 60) }, set: { job.filters.everyMinutes = $0 })) {

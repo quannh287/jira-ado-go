@@ -124,7 +124,7 @@ final class FakeEngine: SyncEngine {
         let jobs = [
             Job(name: "Mobile bugs → ADO", jiraKey: "SE", adoProject: "kai-mobile", type: .manual, mappings: Field.supported),
             Job(name: "Web platform stories", jiraKey: "WEB", adoProject: "kai-web", type: .scheduler, mappings: Array(Field.supported.prefix(4)), filters: web),
-            Job(name: "Support escalations", jiraKey: "SUP", adoProject: "kai-support", type: .webhook, mappings: Array(Field.supported.prefix(3)), filters: demo),
+            Job(name: "Support escalations", jiraKey: "SUP", adoProject: "kai-support", type: .manual, mappings: Array(Field.supported.prefix(3)), filters: demo),
         ]
         let (clock, wait) = (now, delay)
         defer { (now, delay) = (clock, wait) }

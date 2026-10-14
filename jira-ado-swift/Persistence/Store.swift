@@ -248,6 +248,7 @@ enum Setting {
     static let theme = "theme"
     static let notify = "notify"
     static let appIcon = "app_icon"
+    static let menuBar = "menu_bar"
     static let rules = "mapping_rules"
     static let sharedUsers = "shared_users"
 }

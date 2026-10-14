@@ -105,3 +105,11 @@ import Testing
     s.setSetting("k", "v")
     #expect(reported != nil && s.settings["k"] == "v", "memory keeps the change")
 }
+
+@Test func removedSyncTypesLoadAsManual() throws {
+    let path = FileManager.default.temporaryDirectory.appendingPathComponent("wh-\(UUID()).db").path
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    let id = try Store(path: path).addJob(Job(name: "Old", jiraKey: "OLD"))
+    try Database(path: path).exec("UPDATE jobs SET type = 'Webhook' WHERE id = ?", id)
+    #expect(try Store(path: path).job(id)?.type == .manual)
+}

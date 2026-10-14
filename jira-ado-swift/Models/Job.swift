@@ -4,7 +4,8 @@ import Foundation
 
 enum JobStatus: String, Codable, CaseIterable { case active = "ACTIVE", paused = "PAUSED" }
 
-enum SyncType: String, Codable, CaseIterable { case manual = "Manual", scheduler = "Scheduler", webhook = "Webhook" }
+/// Unknown stored values, such as the removed "Webhook", load as manual (see Store.load).
+enum SyncType: String, Codable, CaseIterable { case manual = "Manual", scheduler = "Scheduler" }
 
 struct FieldPair: Codable, Hashable {
     var jira: String
