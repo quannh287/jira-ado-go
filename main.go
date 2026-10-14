@@ -26,6 +26,10 @@ import (
 const keychainService = "com.example.jiraado"
 
 func main() {
+	// A second launch only brings the running app forward; two would share the database and run the same jobs twice.
+	if !mygo.App.RequestSingleInstanceLock() {
+		return
+	}
 	// Logging first, so even a failure to open the database is in the file.
 	logPath := ""
 	if logs, err := mygo.App.Path(mygo.PathLogs); err == nil {
@@ -83,6 +87,12 @@ func main() {
 	// Closing the window only hides it, so running syncs go on; Cmd+Q still quits.
 	var quitting bool
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { quitting = true })
+	mygo.App.OnSecondInstance(func([]string, string) {
+		if win != nil {
+			win.Show()
+			win.Focus()
+		}
+	})
 	mygo.App.OnActivate(func(hasVisibleWindows bool) {
 		if win != nil && !hasVisibleWindows {
 			win.Show()
