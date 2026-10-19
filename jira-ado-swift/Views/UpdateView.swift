@@ -25,13 +25,14 @@ struct UpdateSheet: View {
             .frame(minHeight: 120, maxHeight: 260)
             .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
             HStack {
-                Button("Skip This Version") { model.skipUpdate(update) }
+                Button("Skip This Version") { model.skipUpdate(update) }.help("No more reminders for this version; a newer one still shows")
                 Link("View on GitHub", destination: update.page).font(.callout)
                 Spacer()
                 Button("Later") { model.updateSheet = nil }.keyboardShortcut(.cancelAction)
                 Button("Download", systemImage: "arrow.down.circle") { model.downloadUpdate(update) }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
+                    .help("Opens the DMG download in your browser")
             }
         }
         .padding(20)
@@ -57,6 +58,7 @@ struct UpdateSettings: View {
             HStack {
                 Button("Check Now", systemImage: "arrow.triangle.2.circlepath") { Task { await model.checkForUpdates(manual: true) } }
                     .disabled(model.checkingUpdate)
+                    .help("Checks GitHub for a newer release")
                 if model.checkingUpdate { ProgressView().controlSize(.small) }
                 if let u = model.availableUpdate {
                     Button("Version \(u.version) available…") { model.updateSheet = u }.buttonStyle(.link)

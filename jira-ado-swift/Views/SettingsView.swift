@@ -58,6 +58,7 @@ struct SettingsView: View {
                         model.notifier.notify(id: AppModel.testNotificationID, title: "JirAdo", subtitle: "Notifications work",
                                               body: "Click to come back to Settings. Run notifications open their report.")
                     }
+                    .help("Sends a sample notification to check that macOS shows them")
                 }
                 Text("A desktop notification with the counts; click it to open the run's report. macOS asks for permission the first time.")
                     .font(.callout).foregroundStyle(.secondary)
@@ -98,10 +99,11 @@ struct SettingsView: View {
                 if checking { ProgressView().controlSize(.small) }
                 Text(result).font(.callout).foregroundStyle(.secondary).textSelection(.enabled).lineLimit(2)
                 Spacer()
-                Button("Test Jira", action: testJira).disabled(checking)
+                Button("Test Jira", action: testJira).disabled(checking).help("Signs in to Jira with this URL, email and API token")
                 Button("Save") { Task { await model.saveSettings(jiraURL: jiraURL, email: jiraEmail, jql: jql, keyField: keyField, token: jiraToken) } }
                     .buttonStyle(.borderedProminent)
                     .disabled(checking)
+                    .help("Saves the Jira connection; the token goes to the Keychain")
             }
         }
         .formStyle(.grouped)

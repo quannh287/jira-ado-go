@@ -67,6 +67,7 @@ struct JobsTable: View {
                     Text("⌘N  New Sync Job\n⌘K  Search")
                 } actions: {
                     Button("New Sync Job", systemImage: "plus") { model.path.append(.create) }
+                        .help("Creates a job that syncs one Jira project to one ADO project")
                         .accessibilityIdentifier("empty.newJob")
                 }
             }

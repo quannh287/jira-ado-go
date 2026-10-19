@@ -62,6 +62,7 @@ struct JobView: View {
                     Text("Delete job").bold()
                     Text("Deletes the job and its sync history. Work items already in ADO stay.").font(.callout).foregroundStyle(.secondary)
                     Button("Delete Job…", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                        .help("Deletes the job and its sync history; work items already in ADO stay")
                 }
                 Spacer()
             }
@@ -107,7 +108,7 @@ struct JobView: View {
                     .labelStyle(.titleAndIcon)
                     .buttonStyle(.borderedProminent)
                     .disabled(j.status != .active)
-                    .help("Only ACTIVE jobs can sync")
+                    .help(j.status == .active ? "Syncs Jira issues changed since the last run to ADO" : "Only ACTIVE jobs can sync")
             }
         }
     }

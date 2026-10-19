@@ -143,6 +143,7 @@ struct JobEditorView: View {
                 }
                 .help("Every field the sync can write")
                 Button("Add Pair", systemImage: "plus") { if let p = unmappedPair { job.mappings.append(p) } }.disabled(unmappedPair == nil)
+                    .help("Adds the next field that isn't mapped yet")
             }
         }
     }
@@ -195,7 +196,7 @@ struct JobEditorView: View {
                     Text("Jira user (email or display name) → ADO email, for Assigned To and Created By.").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Add User", systemImage: "plus") { job.filters.users.append(UserPair()) }
+                Button("Add User", systemImage: "plus") { job.filters.users.append(UserPair()) }.help("Adds an empty Jira → ADO user row")
             }
         }
     }

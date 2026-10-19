@@ -102,7 +102,7 @@ struct MappingsView: View {
                     }
                 }
                 HStack {
-                    Button("Add User", systemImage: "plus") { form.users.append(UserPair()) }
+                    Button("Add User", systemImage: "plus") { form.users.append(UserPair()) }.help("Adds an empty Jira → ADO user row")
                     Button("Import from Jobs", systemImage: "person.2") { model.show("Imported \(form.importUsers(from: model.store.jobs)) users; Save to keep them") }
                         .help("Adds every job's user mapping that isn't here yet")
                 }
@@ -139,7 +139,7 @@ struct MappingsView: View {
                 IconButton("Reset Rules to Defaults", systemImage: "arrow.counterclockwise",
                            help: "Reset Rules to Defaults: the source app's rules; shared users stay") { form = MappingsForm(rules: .defaults, users: form.users) }
                 IconButton("Revert", systemImage: "arrow.uturn.backward", help: "Revert: discard unsaved changes", action: load)
-                Button("Save", action: save).buttonStyle(.borderedProminent).disabled(err != nil)
+                Button("Save", action: save).buttonStyle(.borderedProminent).disabled(err != nil).help("Saves these mappings")
             }
             .padding(12)
             .background(.bar)
