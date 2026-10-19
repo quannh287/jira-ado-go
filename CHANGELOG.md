@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/quannh287/jira-ado-go/compare/v0.7.0...v0.7.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* show the in-flight run in the Sync History tab ([205457e](https://github.com/quannh287/jira-ado-go/commit/205457e6e6f074031cbf88132b98557e28f5de5a))
+
 ## [0.7.0](https://github.com/quannh287/jira-ado-go/compare/v0.6.0...v0.7.0) (2026-10-19)
 
 
