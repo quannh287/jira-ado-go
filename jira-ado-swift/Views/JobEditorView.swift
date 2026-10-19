@@ -167,6 +167,7 @@ struct JobEditorView: View {
             }
             .pickerStyle(.radioGroup)
             .horizontalRadioGroupLayout()
+            Text("Issues in an active Jira sprint go to that week's ADO sprint; everything else to the backlog root.").font(.callout).foregroundStyle(.secondary)
             if job.filters.autoPaths {
                 TextField("Sprint root", text: $job.filters.sprintRoot, prompt: Text(Defaults.sprintRoot))
                 TextField("Anchor sprint", value: $job.filters.anchorSprint, format: .number)
