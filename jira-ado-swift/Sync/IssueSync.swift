@@ -118,7 +118,7 @@ extension SyncRun {
         }
         (f.area, f.iteration) = job.paths(at: now())
         if job.filters.autoPaths {
-            let inSprint = d.inActiveSprint(sprintFields)
+            let inSprint = d.inActiveSprint(sprintFields, futureCounts: job.filters.futureSprints == true)
             if inSprint != true {
                 f.iteration = job.backlogPath  // out of sprint, or taken out of one: back to the backlog
                 // Jira sent no sprint data: a new item still starts in the backlog, an existing one isn't moved there.

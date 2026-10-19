@@ -173,6 +173,9 @@ struct JobEditorView: View {
                 TextField("Anchor sprint", value: $job.filters.anchorSprint, format: .number)
                 TextField("Anchor date", text: $job.filters.anchorDate, prompt: Text("2026-06-01"))
                     .help("Monday the anchor sprint starts; one ADO sprint per week after it.")
+                Toggle("Count sprints Jira hasn't started", isOn: Binding(get: { job.filters.futureSprints == true }, set: { job.filters.futureSprints = $0 }))
+                Text("A sprint planned but not started yet counts as the current one, instead of leaving its issues in the backlog.")
+                    .font(.callout).foregroundStyle(.secondary)
                 KV("In active Jira sprint", job.paths(at: Date()).iteration)
                 KV("Otherwise (backlog)", job.backlogPath)
             } else {

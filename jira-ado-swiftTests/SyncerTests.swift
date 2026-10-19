@@ -253,6 +253,12 @@ struct Setup {
     _ = await s3.sync()
     #expect(s3.a.items[kept]!.comments.count == 1, "the same target iteration is only said once")
 
+    var sF = Setup()  // a sprint Jira hasn't started counts when futureSprints is on
+    sF.job.filters.futureSprints = true
+    sF.j.issues[0].raw[sprintFieldID] = [["id": 1, "state": "future"]]
+    let planned = await sF.sync().tickets[0].adoID
+    #expect(sF.a.items[planned]!.fields[Field.iteration] as? String == #"Tickets\Weekly Sprint\Sprint 82"#)
+
     var s4 = Setup()  // Jira answered without the Sprint field at all: the item isn't dragged to the backlog
     let unknown = await s4.sync().tickets[0].adoID
     s4.a.items[unknown]!.fields[Field.iteration] = #"Tickets\Weekly Sprint\Sprint 82"#

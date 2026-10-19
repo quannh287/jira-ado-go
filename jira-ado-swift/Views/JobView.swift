@@ -138,7 +138,7 @@ struct FiltersRows: View {
         KV("Assignees", !f.userFilter ? "Everyone" : f.assignees.trimmingCharacters(in: .whitespaces).isEmpty ? "Assignees mapped to an ADO email" : f.assignees)
         KV("Area path", area)
         if f.autoPaths {
-            KV("In active Jira sprint", "\(iteration) (weekly, Sprint \(f.anchorSprint) = \(f.anchorDate))")
+            KV("In \(f.futureSprints == true ? "any open" : "an active") Jira sprint", "\(iteration) (weekly, Sprint \(f.anchorSprint) = \(f.anchorDate))")
             KV("Otherwise (backlog)", job.backlogPath)
         } else {
             KV("Iteration", iteration)

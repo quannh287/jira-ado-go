@@ -35,6 +35,7 @@ struct Filters: Codable, Hashable {
     // Optional so jobs saved before it still decode; on, an existing item keeps whatever iteration ADO has.
     var keepIteration: Bool?
     var commentIteration: Bool?  // with keepIteration, comment the kept difference on the ADO item
+    var futureSprints: Bool?  // a sprint Jira hasn't started yet also counts as the current one
     var everyMinutes = 0  // Scheduler jobs; 0 = an hour
 
     /// How long a Scheduler job waits after its last run.

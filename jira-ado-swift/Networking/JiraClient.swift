@@ -56,10 +56,11 @@ struct JiraIssue {
 
     /// Whether the issue sits in a sprint that has started and not closed; nil when Jira sent no sprint data
     /// at all, which is unknown, not out of sprint - an account that can't read the field would empty every sprint.
-    func inActiveSprint(_ sprintFields: [String]) -> Bool? {
+    func inActiveSprint(_ sprintFields: [String], futureCounts: Bool = false) -> Bool? {
         guard sprintFields.contains(where: { raw.index(forKey: $0) != nil }) else { return nil }
+        let states = futureCounts ? ["active", "future"] : ["active"]
         return sprintFields.contains { f in
-            (raw[f] as? [JSONObject] ?? []).contains { ($0["state"] as? String)?.lowercased() == "active" }
+            (raw[f] as? [JSONObject] ?? []).contains { states.contains(($0["state"] as? String)?.lowercased() ?? "") }
         }
     }
 }
