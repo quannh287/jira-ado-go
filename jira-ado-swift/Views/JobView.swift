@@ -49,7 +49,7 @@ struct JobView: View {
                 editBar(2, "Comments, user filter, user mapping, area and iteration.")
                 Form { FiltersRows(job: j) }.formStyle(.grouped)
             case .history:
-                RunsTable(runs: model.store.runs(for: id))
+                RunsTable(runs: (model.live[id].map { [$0.run] } ?? []) + model.store.runs(for: id))
             case .activity:
                 List(Array(j.activity.reversed().enumerated()), id: \.offset) { _, a in
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -152,6 +152,7 @@ struct FiltersRows: View {
 }
 
 /// Runs, newest first; a click opens the run's report. With selection, rows multi-select and show a delete button instead.
+/// A run still in flight has id 0 and shows as "Live".
 struct RunsTable: View {
     @Environment(AppModel.self) private var model
     let runs: [Run]
@@ -173,21 +174,21 @@ struct RunsTable: View {
     }
 
     private func open(_ id: Int?) {
-        guard let id, let r = model.store.run(id) else { return }
-        model.path.append(.report(r.jobID, runID: r.id))
+        guard let id, let r = id == 0 ? runs.first(where: { $0.id == 0 }) : model.store.run(id) else { return }
+        model.path.append(.report(r.jobID, runID: r.id == 0 ? nil : r.id))
     }
 
     @TableColumnBuilder<Run, Never>
     private func columns(manage: Bool) -> some TableColumnContent<Run, Never> {
-        TableColumn("Run") { Text("#\($0.id)") }.width(60)
+        TableColumn("Run") { Text($0.id == 0 ? "Live" : "#\($0.id)") }.width(60)
         TableColumn("Job") { r in Text(model.store.job(r.jobID)?.name ?? "Job \(r.jobID)") }
         TableColumn("Started") { Text($0.started.short) }.width(140)
-        TableColumn("Status") { r in Pill(r.status.rawValue, r.status.color) }.width(80)
+        TableColumn("Status") { r in Pill(r.id == 0 ? "running" : r.status.rawValue, r.id == 0 ? .secondary : r.status.color) }.width(80)
         TableColumn("Created") { r in count(r, .created) }.width(60)
         TableColumn("Updated") { r in count(r, .updated) }.width(60)
         TableColumn("Skipped") { r in count(r, .skipped) }.width(60)
         TableColumn("Failed") { r in count(r, .failed) }.width(55)
-        TableColumn("Duration") { r in Text(fmtDuration(r.duration)).foregroundStyle(.secondary) }.width(70)
+        TableColumn("Duration") { r in Text(r.id == 0 ? "—" : fmtDuration(r.duration)).foregroundStyle(.secondary) }.width(70)
         if manage {
             TableColumn("") { r in
                 IconButton("Delete", systemImage: "trash", role: .destructive) { model.store.deleteRuns([r.id]) }
