@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/quannh287/jira-ado-go/compare/v0.7.1...v0.8.0) (2026-10-19)
+
+
+### Features
+
+* option to count sprints Jira hasn't started yet ([7fc1b4f](https://github.com/quannh287/jira-ado-go/commit/7fc1b4fac0512ed5f9c5281eb8d07d1a8c426aff))
+
+
+### Bug Fixes
+
+* don't move a work item to the backlog when Jira sends no sprint data ([177ca71](https://github.com/quannh287/jira-ado-go/commit/177ca71d0df8acb458d4a1c4119fac4c3e0ebf23))
+
 ## [0.7.1](https://github.com/quannh287/jira-ado-go/compare/v0.7.0...v0.7.1) (2026-10-19)
 
 
