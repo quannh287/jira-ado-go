@@ -209,8 +209,8 @@ final class JiraADOUITests: XCTestCase {
         openJob("Mobile bugs → ADO")
         button("Sync Now").click()
         enabled(button("Sync Now"))  // the fake run takes a moment, then the job can sync again
-        button("View Report").click()
-        wait(text("Tickets"))
+        tab("Sync History")
+        click(app.outlines.element(boundBy: 1).outlineRows.firstMatch.staticTexts.firstMatch, until: text("Tickets"))
         wait(text("created"))
         XCTAssertTrue(textStarting("Mobile bugs → ADO · Run #").exists)
     }

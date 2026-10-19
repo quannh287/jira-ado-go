@@ -91,10 +91,6 @@ struct JobView: View {
                 Pill(j.status.rawValue, j.status.color)
             }
             IconButton("Edit Job", systemImage: "pencil") { model.path.append(.edit(id, step: 0)) }
-            IconButton("View Report", systemImage: "doc.text.magnifyingglass") {
-                model.path.append(.report(id, runID: running ? nil : model.store.lastRun(id)?.id))
-            }
-            .disabled(!running && model.store.lastRun(id) == nil)
             if j.status == .active {
                 IconButton("Pause", systemImage: "pause.circle") { model.store.setStatus(id, .paused) }.disabled(running)
             } else {

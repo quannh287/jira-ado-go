@@ -56,7 +56,7 @@ The Swift app has the same bundle ID, so it replaces `/Applications/jira-ado.app
 
 1. **Sign in**: enter your ADO organization (the `<org>` in `dev.azure.com/<org>`) and a Personal Access Token with the **Work Items (Read & Write)** scope.
 2. **Settings**: enter your Jira site URL, email and an [API token](https://id.atlassian.com/manage-profile/security/api-tokens), then click **Test Jira**.
-3. **New Sync Job** (⌘N), then **Sync Now** and **View Report**.
+3. **New Sync Job** (⌘N), then **Sync Now**; the run's report opens from the **Sync History** tab.
 
 ## Development
 
