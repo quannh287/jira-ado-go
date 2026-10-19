@@ -1,9 +1,13 @@
 import Foundation
 
-/// A non-2xx response; the body is kept for the report.
+/// A non-2xx response, or ADO's 203 sign-in page; the body is kept for the report.
 struct HTTPStatusError: LocalizedError {
     let method: String, url: String, status: Int, body: Data
-    var errorDescription: String? { "\(method) \(url): HTTP \(status): \(truncate(body, 300))" }
+    var isAuth: Bool { status == 401 || status == 203 }
+    var errorDescription: String? {
+        if isAuth { return "\(method) \(url): HTTP \(status): credentials rejected — the PAT or API token is wrong, expired or revoked. Sign out and sign in with a new one." }
+        return "\(method) \(url): HTTP \(status): \(truncate(body, 300))"
+    }
 }
 
 /// A completed exchange, also returned alongside errors so callers can log it.
@@ -45,7 +49,8 @@ final class HTTPClient {
             var err: Error?
             do {
                 (resp.status, resp.body) = try await once(method, url, contentType, body)
-                if resp.status >= 300 { err = HTTPStatusError(method: method, url: url, status: resp.status, body: resp.body) }
+                // ADO answers a rejected PAT with 203 and an HTML sign-in page instead of 401.
+                if resp.status >= 300 || resp.status == 203 { err = HTTPStatusError(method: method, url: url, status: resp.status, body: resp.body) }
             } catch { err = error }
             resp.duration = Date().timeIntervalSince(start)
             guard let e = err else { return (resp, nil) }

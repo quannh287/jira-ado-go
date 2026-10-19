@@ -195,6 +195,18 @@ struct NetworkTests {
         #expect(try await !a.nodeExists(kind: "areas", path: #"Other\KPL"#), "a path outside the project can't be used")
     }
 
+    @Test func adoSignInPageIsAnAuthError() async {
+        StubProtocol.respond { _ in (203, "<html>Azure DevOps Services | Sign In</html>") }
+        let a = ADOClient(org: "o", project: "Tickets", pat: "expired")
+        do {
+            _ = try await a.nodeExists(kind: "areas", path: #"Tickets\KPL"#)
+            Issue.record("a 203 sign-in page must not pass the preflight")
+        } catch {
+            #expect((error as? HTTPStatusError)?.isAuth == true && describe(error).contains("credentials rejected"))
+        }
+        #expect(StubProtocol.requests.count == 1, "auth errors aren't retried")
+    }
+
     @Test func adoWorkItemAndCatalog() async throws {
         StubProtocol.respond { r in
             switch true {
