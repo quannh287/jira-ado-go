@@ -155,7 +155,6 @@ extension SyncRun {
     /// Reads the item once, then writes only fields whose value differs; ADO's Done wins and is only commented.
     private func update(_ id: Int, _ f: IssueFields, _ d: JiraIssue) async throws -> UpdateResult {
         var f = f
-        if job.filters.keepIteration == true { f.iteration = "" }  // dropped by ops(): an ADO move isn't undone
         let w = try await ado.get(id)
         var cur = w.fields
         var res = UpdateResult(rels: w.relations)
@@ -171,6 +170,12 @@ extension SyncRun {
             try await ado.update(id, ops: [PatchOp(op: "add", path: "/fields/" + Field.state, value: initialState(f.wiType))])
             cur[Field.state] = initialState(f.wiType)
             res.wrote = true
+        }
+
+        if job.filters.keepIteration == true {
+            if job.filters.commentIteration == true,
+               try await noteIteration(id, want: f.iteration, have: cur[Field.iteration] as? String ?? "") { res.wrote = true }
+            f.iteration = ""  // dropped by ops(): an ADO move isn't undone
         }
 
         // ADO is the source of truth for these once filled: the sync keeps them and comments the difference.
@@ -199,6 +204,19 @@ extension SyncRun {
         }
         return res
     }
+
+    /// Says once per target iteration that Jira moved the issue (a late sprint, say) while ADO's placement was kept.
+    // ponytail: the comment mappings table doubles as the "already said this" marker; its own table if more notes appear
+    private func noteIteration(_ id: Int, want: String, have: String) async throws -> Bool {
+        guard !want.isEmpty, want != have else { return false }
+        let mapped = try state.commentMappings(workItem: id)
+        guard mapped[Self.iterationNote]?.jiraUpdated != want else { return false }
+        let commentID = try await ado.addComment(id, html: "<p>Jira xếp issue này vào <b>\(escapeHTML(want))</b>, nhưng iteration trên ADO (<b>\(escapeHTML(have))</b>) được giữ nguyên. Chuyển thủ công nếu cần.</p>")
+        try state.saveCommentMapping(CommentMapping(workItemID: id, jiraCommentID: Self.iterationNote, adoCommentID: commentID, jiraUpdated: want))
+        return true
+    }
+
+    static let iterationNote = "sync:iteration"
 
     /// Replaces the item's ADO attachments with Jira's; with none in Jira it does nothing, so files attached in ADO stay.
     // ponytail: re-uploads all files when Jira has any, like the source; diff by name+size if uploads get slow

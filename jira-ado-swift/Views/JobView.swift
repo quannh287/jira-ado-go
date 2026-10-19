@@ -143,7 +143,9 @@ struct FiltersRows: View {
         } else {
             KV("Iteration", iteration)
         }
-        if f.keepIteration == true { KV("Existing items", "Keep the ADO iteration") }
+        if f.keepIteration == true {
+            KV("Existing items", "Keep the ADO iteration" + (f.commentIteration == true ? ", comment the difference" : ""))
+        }
         if f.users.isEmpty { KV("User mapping", "None") }
         ForEach(Array(f.users.enumerated()), id: \.offset) { _, u in KV(u.jira, u.adoEmail) }
     }

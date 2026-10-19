@@ -245,6 +245,13 @@ struct Setup {
     s3.j.issues[0].raw[sprintFieldID] = [["id": 1, "state": "future"]]
     _ = await s3.sync()
     #expect(s3.a.items[kept]!.fields[Field.iteration] as? String == #"Tickets\Moved"#)
+    #expect(s3.a.items[kept]!.comments.isEmpty, "silent without commentIteration")
+
+    s3.job.filters.commentIteration = true
+    _ = await s3.sync()
+    #expect(s3.a.items[kept]!.comments.count == 1)
+    _ = await s3.sync()
+    #expect(s3.a.items[kept]!.comments.count == 1, "the same target iteration is only said once")
 
     var s2 = Setup()  // without a Sprint field nothing is written
     s2.j.noSprintField = true

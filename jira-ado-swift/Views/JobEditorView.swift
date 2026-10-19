@@ -181,6 +181,11 @@ struct JobEditorView: View {
             Toggle("Keep the ADO iteration", isOn: Binding(get: { job.filters.keepIteration == true }, set: { job.filters.keepIteration = $0 }))
             Text("Only place new work items; an item moved to another iteration in ADO stays there, even if Jira says otherwise.")
                 .font(.callout).foregroundStyle(.secondary)
+            if job.filters.keepIteration == true {
+                Toggle("Comment the kept iteration", isOn: Binding(get: { job.filters.commentIteration == true }, set: { job.filters.commentIteration = $0 }))
+                Text("Leaves one comment on the ADO item each time Jira asks for a different iteration, such as an issue added to a sprint late.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
             checkRow
         }
         Section {
