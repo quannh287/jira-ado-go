@@ -178,6 +178,9 @@ struct JobEditorView: View {
             } else {
                 TextField("Iteration path", text: $job.filters.iteration, prompt: Text(#"Tickets\Sprint 42"#))
             }
+            Toggle("Keep the ADO iteration", isOn: Binding(get: { job.filters.keepIteration == true }, set: { job.filters.keepIteration = $0 }))
+            Text("Only place new work items; an item moved to another iteration in ADO stays there, even if Jira says otherwise.")
+                .font(.callout).foregroundStyle(.secondary)
             checkRow
         }
         Section {

@@ -237,6 +237,15 @@ struct Setup {
     _ = await s.sync()
     #expect(s.a.items[id]!.fields[Field.iteration] as? String == #"Tickets\Weekly Sprint"#)
 
+    var s3 = Setup()  // keepIteration: the first placement stands, later runs leave it alone
+    s3.job.filters.keepIteration = true
+    let kept = await s3.sync().tickets[0].adoID
+    #expect(s3.a.items[kept]!.fields[Field.iteration] as? String == #"Tickets\Weekly Sprint\Sprint 82"#)
+    s3.a.items[kept]!.fields[Field.iteration] = #"Tickets\Moved"#
+    s3.j.issues[0].raw[sprintFieldID] = [["id": 1, "state": "future"]]
+    _ = await s3.sync()
+    #expect(s3.a.items[kept]!.fields[Field.iteration] as? String == #"Tickets\Moved"#)
+
     var s2 = Setup()  // without a Sprint field nothing is written
     s2.j.noSprintField = true
     let run = await s2.sync()

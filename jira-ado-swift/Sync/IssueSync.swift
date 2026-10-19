@@ -155,6 +155,7 @@ extension SyncRun {
     /// Reads the item once, then writes only fields whose value differs; ADO's Done wins and is only commented.
     private func update(_ id: Int, _ f: IssueFields, _ d: JiraIssue) async throws -> UpdateResult {
         var f = f
+        if job.filters.keepIteration == true { f.iteration = "" }  // dropped by ops(): an ADO move isn't undone
         let w = try await ado.get(id)
         var cur = w.fields
         var res = UpdateResult(rels: w.relations)

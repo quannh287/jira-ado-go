@@ -32,6 +32,8 @@ struct Filters: Codable, Hashable {
     var sprintRoot = Defaults.sprintRoot
     var anchorSprint = Defaults.anchorSprint
     var anchorDate = Defaults.anchorDate  // yyyy-mm-dd, UTC start of anchorSprint
+    // Optional so jobs saved before it still decode; on, an existing item keeps whatever iteration ADO has.
+    var keepIteration: Bool?
     var everyMinutes = 0  // Scheduler jobs; 0 = an hour
 
     /// How long a Scheduler job waits after its last run.
