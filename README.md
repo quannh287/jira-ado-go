@@ -69,4 +69,4 @@ Requires Xcode 26 or later (macOS 26 SDK); the project is maintained with Xcode 
 
 ## Releases
 
-CI (`.github/workflows/build.yml`) runs the unit tests on pushes to `main` and on pull requests, skipping docs/design-only changes. UI tests run locally only. To release, push a tag: `git tag v0.3.0 && git push origin v0.3.0`. CI builds a universal `jira-ado.app` with the tag's version, publishes the release with `jira-ado-<version>.dmg`, then commits that version to `MARKETING_VERSION` on `main` if it's newer (run `git pull` afterwards). **Actions → Build → Run workflow** builds on demand.
+CI (`.github/workflows/build.yml`) runs the unit tests on pushes to `main` and on pull requests, skipping docs/design-only changes. UI tests run locally only. Releases use [Release Please](https://github.com/googleapis/release-please): from Conventional Commits on `main` it keeps a release PR open with the next version, `CHANGELOG.md` and `MARKETING_VERSION`. Merging that PR tags `vX.Y.Z`, publishes the GitHub release with the changelog as its notes, then builds a universal `jira-ado.app` and attaches `jira-ado-<version>.dmg`. **Actions → Build → Run workflow** builds on demand.

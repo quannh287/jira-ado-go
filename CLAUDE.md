@@ -41,4 +41,4 @@ Native macOS app in Swift/SwiftUI (Xcode 26+, maintained with Xcode 27; macOS 26
 
 ## Releases
 
-`.github/workflows/build.yml` (macos-26, latest-stable Xcode): unit tests on pushes to main and PRs, skipping `**/*.md`, `docs/`, `design/`; a `v*` tag builds a universal, ad-hoc signed `jira-ado.app` with the tag as `MARKETING_VERSION`, publishes `jira-ado-<version>.dmg`, then bumps `MARKETING_VERSION` on main if newer. `workflow_dispatch` builds without releasing.
+`.github/workflows/build.yml` (macos-26, latest-stable Xcode): unit tests on pushes to main and PRs, skipping `**/*.md`, `docs/`, `design/`. `.github/workflows/release-please.yml` keeps a release PR from Conventional Commits (`release-please-config.json`, `.release-please-manifest.json`, `version.txt`, `CHANGELOG.md`) and sets `MARKETING_VERSION` in it; merging tags `vX.Y.Z` and publishes the release with the changelog, then calls `build.yml` (`workflow_call` with `tag`) to build a universal, ad-hoc signed `jira-ado.app` and attach `jira-ado-<version>.dmg`. `workflow_dispatch` builds without releasing.

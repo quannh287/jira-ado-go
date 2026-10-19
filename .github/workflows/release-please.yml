@@ -1,0 +1,45 @@
+name: Release Please
+
+# Keeps a release PR open from Conventional Commits on main. Merging it tags the version,
+# publishes the GitHub release with its changelog, then builds and attaches the DMG.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+      # The release PR carries MARKETING_VERSION, so the merged commit already has the new version.
+      - uses: actions/checkout@v7
+        if: steps.rp.outputs.pr
+        with:
+          ref: ${{ fromJSON(steps.rp.outputs.pr).headBranchName }}
+      - name: Set MARKETING_VERSION in the release PR
+        if: steps.rp.outputs.pr
+        run: |
+          version=$(jq -r '."."' .release-please-manifest.json)
+          sed -i -E "s/MARKETING_VERSION = [^;]+;/MARKETING_VERSION = $version;/" jira-ado-swift.xcodeproj/project.pbxproj
+          git diff --quiet && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: set MARKETING_VERSION to $version"
+          git push
+
+  build:
+    # Tags pushed with GITHUB_TOKEN don't start workflows, so the build is called from here.
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/build.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
