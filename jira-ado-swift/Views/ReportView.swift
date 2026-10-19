@@ -94,6 +94,7 @@ private struct RunDetail: View {
                             Button("Retry \(n) Failed", systemImage: "arrow.clockwise") { model.retryFailed(r) }
                                 .help("Runs just these tickets again; the cursor isn't moved")
                         }
+                        IconButton("Export JSON", systemImage: "square.and.arrow.up") { exportRuns([r], model, name: "sync-run-\(r.id).json") }
                         Pill(r.status.rawValue, r.status.color)
                     }
                 }

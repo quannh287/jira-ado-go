@@ -29,7 +29,7 @@ struct LogsView: View {
                         Text("All statuses").tag(RunStatus?.none)
                         ForEach(RunStatus.allCases, id: \.self) { Text($0.rawValue).tag(RunStatus?.some($0)) }
                     }
-                    IconButton("Export JSON", systemImage: "square.and.arrow.up") { export(runs) }.disabled(runs.isEmpty)
+                    IconButton("Export JSON", systemImage: "square.and.arrow.up") { exportRuns(runs, model) }.disabled(runs.isEmpty)
                     IconButton(chosen.isEmpty ? "Delete Selected" : "Delete \(chosen.count)…", systemImage: "trash", role: .destructive) { confirm = true }
                         .disabled(chosen.isEmpty)
                 }
@@ -44,21 +44,22 @@ struct LogsView: View {
                 Text("Their reports are deleted too. This can't be undone.")
             }
     }
+}
 
-    private func export(_ runs: [Run]) {
-        let enc = JSONEncoder()
-        enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        enc.dateEncodingStrategy = .iso8601
-        let panel = NSSavePanel()
-        panel.title = "Export runs"
-        panel.nameFieldStringValue = "sync-runs.json"
-        panel.allowedContentTypes = [.json]
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            try enc.encode(runs).write(to: url)
-            model.show("Exported \(runs.count) runs")
-        } catch { model.show("Export failed: " + describe(error)) }
-    }
+/// Saves runs as a JSON array; one run exports as a one-element array so both files read the same.
+func exportRuns(_ runs: [Run], _ model: AppModel, name: String = "sync-runs.json") {
+    let enc = JSONEncoder()
+    enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    enc.dateEncodingStrategy = .iso8601
+    let panel = NSSavePanel()
+    panel.title = runs.count == 1 ? "Export run" : "Export runs"
+    panel.nameFieldStringValue = name
+    panel.allowedContentTypes = [.json]
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    do {
+        try enc.encode(runs).write(to: url)
+        model.show(runs.count == 1 ? "Exported run #\(runs[0].id)" : "Exported \(runs.count) runs")
+    } catch { model.show("Export failed: " + describe(error)) }
 }
 
 #Preview("Logs") {
