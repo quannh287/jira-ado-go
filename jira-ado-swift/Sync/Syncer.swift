@@ -3,7 +3,7 @@ import Foundation
 // The real Jira→ADO engine, ported from the source app's app/api/sync/jobs/[id]/run/route.ts.
 
 protocol JiraAPI {
-    func sprintField() async throws -> String
+    func sprintFields() async throws -> [String]
     func timeZone() async throws -> TimeZone
     func search(_ jql: String, fields: [String]) async throws -> [JiraIssue]
     func comments(_ key: String) async throws -> [JiraComment]
@@ -205,7 +205,7 @@ final class SyncRun {
     /// No cursor: the whole backlog is imported, so Done items are skipped without a comment each.
     var firstRun = false
     /// Jira's Sprint custom field, read when iterations follow the Jira sprint.
-    var sprintField = ""
+    var sprintFields: [String] = []
 
     init(conn: Connection, job: Job, now: @escaping () -> Date, state: SyncState, dry: Bool) {
         self.conn = conn
@@ -224,8 +224,8 @@ final class SyncRun {
         if job.filters.autoPaths {
             paths.append(("iterations", job.backlogPath))
             // Without the Sprint field every issue would look out of sprint and be moved to the backlog.
-            sprintField = try await jira.sprintField()
-            if sprintField.isEmpty { problems.append("Jira has no Sprint field this account can read, so issues can't be placed by sprint") }
+            sprintFields = try await jira.sprintFields()
+            if sprintFields.isEmpty { problems.append("Jira has no Sprint field this account can read, so issues can't be placed by sprint") }
         }
         for (kind, path) in paths {
             let label = kind == "areas" ? "Area" : "Iteration"

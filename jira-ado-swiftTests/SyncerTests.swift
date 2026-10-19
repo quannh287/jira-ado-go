@@ -15,7 +15,7 @@ final class FakeJira: JiraAPI {
     var noSprintField = false
     var zone = TimeZone(identifier: "UTC")!
 
-    func sprintField() async throws -> String { noSprintField ? "" : sprintFieldID }
+    func sprintFields() async throws -> [String] { noSprintField ? [] : [sprintFieldID] }
     func timeZone() async throws -> TimeZone { zone }
     func comments(_ key: String) async throws -> [JiraComment] { comments[key] ?? [] }
     func download(_ url: String) async throws -> Data { Data("file".utf8) }
@@ -252,6 +252,13 @@ struct Setup {
     #expect(s3.a.items[kept]!.comments.count == 1)
     _ = await s3.sync()
     #expect(s3.a.items[kept]!.comments.count == 1, "the same target iteration is only said once")
+
+    var s4 = Setup()  // Jira answered without the Sprint field at all: the item isn't dragged to the backlog
+    let unknown = await s4.sync().tickets[0].adoID
+    s4.a.items[unknown]!.fields[Field.iteration] = #"Tickets\Weekly Sprint\Sprint 82"#
+    s4.j.issues[0].raw[sprintFieldID] = nil
+    _ = await s4.sync()
+    #expect(s4.a.items[unknown]!.fields[Field.iteration] as? String == #"Tickets\Weekly Sprint\Sprint 82"#)
 
     var s2 = Setup()  // without a Sprint field nothing is written
     s2.j.noSprintField = true

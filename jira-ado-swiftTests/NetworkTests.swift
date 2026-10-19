@@ -110,7 +110,7 @@ struct NetworkTests {
                 : (200, #"{"issues":[{"id":"1","key":"SE-1","fields":{"summary":"one","customfield_1":[{"state":"active"}]}}],"nextPageToken":"t2"}"#)
         }
         let issues = try await jira.search("project = \"SE\"", fields: ["id"])
-        #expect(issues.map(\.key) == ["SE-1", "SE-2"] && issues[0].summary == "one" && issues[0].inActiveSprint("customfield_1"))
+        #expect(issues.map(\.key) == ["SE-1", "SE-2"] && issues[0].summary == "one" && issues[0].inActiveSprint(["customfield_1"]) == true)
         let req = StubProtocol.requests[0]
         #expect(req.method == "POST" && req.url == "https://site.test/rest/api/3/search/jql")
         #expect(req.headers["Authorization"] == basicAuth("me@x.io", "tok"))
@@ -142,7 +142,7 @@ struct NetworkTests {
             default: (200, #"[{"name":"Bug","statuses":[{"name":"To Do"},{"name":"Done"}]},{"name":"Task","statuses":[{"name":"To Do"}]}]"#)
             }
         }
-        #expect(try await jira.sprintField() == "customfield_10020")
+        #expect(try await jira.sprintFields() == ["customfield_10020"])
         #expect(try await jira.timeZone().identifier == "Asia/Singapore")
         #expect(try await jira.myself() == "Me")
         #expect(try await jira.priorities() == ["High", "Low"])
@@ -159,7 +159,7 @@ struct NetworkTests {
         ])
         #expect(i.issueType == "Sub-task" && i.isSubtaskType && i.parent?.key == "SE-9" && i.priority == "High" && i.status == "Done")
         #expect(i.timeSpent == 5400 && i.timeEstimate == 0 && i.subtasks.map(\.id) == ["2"] && i.attachments.first?.filename == "a.png")
-        #expect(i.assignee?.email == "a@x.io" && i.reporter == nil && !i.inActiveSprint("customfield_1"))
+        #expect(i.assignee?.email == "a@x.io" && i.reporter == nil && i.inActiveSprint(["customfield_1"]) == nil)
     }
 
     // MARK: ADO

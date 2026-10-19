@@ -54,9 +54,13 @@ struct JiraIssue {
         (raw["attachment"] as? [JSONObject] ?? []).map { JiraAttachment(filename: $0["filename"] as? String ?? "", content: $0["content"] as? String ?? "") }
     }
 
-    /// Whether the issue sits in a sprint that has started and not closed.
-    func inActiveSprint(_ sprintField: String) -> Bool {
-        (raw[sprintField] as? [JSONObject] ?? []).contains { $0["state"] as? String == "active" }
+    /// Whether the issue sits in a sprint that has started and not closed; nil when Jira sent no sprint data
+    /// at all, which is unknown, not out of sprint - an account that can't read the field would empty every sprint.
+    func inActiveSprint(_ sprintFields: [String]) -> Bool? {
+        guard sprintFields.contains(where: { raw.index(forKey: $0) != nil }) else { return nil }
+        return sprintFields.contains { f in
+            (raw[f] as? [JSONObject] ?? []).contains { ($0["state"] as? String)?.lowercased() == "active" }
+        }
     }
 }
 
@@ -77,11 +81,11 @@ final class JiraClient {
 
     static let allFields = ["*all"]
 
-    /// The ID of the Jira Software Sprint field (e.g. customfield_10020), or "" if the site has none.
-    func sprintField() async throws -> String {
+    /// Every Jira Software Sprint field (e.g. customfield_10020); a migrated site can list more than one.
+    func sprintFields() async throws -> [String] {
         let fields = try await json("GET", "/field") as? [JSONObject] ?? []
-        let f = fields.first { ($0["schema"] as? JSONObject)?["custom"] as? String == "com.pyxis.greenhopper.jira:gh-sprint" }
-        return f?["id"] as? String ?? ""
+        return fields.filter { ($0["schema"] as? JSONObject)?["custom"] as? String == "com.pyxis.greenhopper.jira:gh-sprint" }
+            .compactMap { $0["id"] as? String }
     }
 
     /// Pages through POST /search/jql with nextPageToken.

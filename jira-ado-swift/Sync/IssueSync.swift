@@ -5,6 +5,7 @@ struct IssueFields {
     var wiType = "", title = "", description = "", start = "", target = "", priority = "", state = ""
     var area = "", iteration = "", key = "", createdBy = "", assignedTo = ""
     var originalEstimate = 0.0, remaining = 0.0, completed = 0.0  // hours, 0 = none
+    var sprintUnknown = false  // Jira answered without the Sprint field, so its placement says nothing
     var parentID = 0
 }
 
@@ -116,8 +117,13 @@ extension SyncRun {
             f.completed = hours(d.timeSpent)
         }
         (f.area, f.iteration) = job.paths(at: now())
-        if job.filters.autoPaths && !d.inActiveSprint(sprintField) {
-            f.iteration = job.backlogPath  // out of sprint, or taken out of one: back to the backlog
+        if job.filters.autoPaths {
+            let inSprint = d.inActiveSprint(sprintFields)
+            if inSprint != true {
+                f.iteration = job.backlogPath  // out of sprint, or taken out of one: back to the backlog
+                // Jira sent no sprint data: a new item still starts in the backlog, an existing one isn't moved there.
+                f.sprintUnknown = inSprint == nil
+            }
         }
         f.assignedTo = resolveEmail(d.assignee, job.filters.users)
         f.createdBy = resolveEmail(d.reporter, job.filters.users)
@@ -172,6 +178,10 @@ extension SyncRun {
             res.wrote = true
         }
 
+        if f.sprintUnknown {
+            AppLog.warn("no Sprint field in Jira's answer; keeping the ADO iteration", ["key": f.key, "item": id])
+            f.iteration = ""
+        }
         if job.filters.keepIteration == true {
             if job.filters.commentIteration == true,
                try await noteIteration(id, want: f.iteration, have: cur[Field.iteration] as? String ?? "") { res.wrote = true }
