@@ -103,9 +103,16 @@ func parseDay(_ s: String) -> Date? {
     return date
 }
 
-/// anchor + whole weeks (floored) from anchorDate to t's UTC day; an unparsable date counts as no weeks.
+/// The Monday (UTC) of d's week.
+func weekStart(_ d: Date) -> Date {
+    let back = (utcCalendar.component(.weekday, from: d) + 5) % 7  // Sunday = 1 → 6, Monday = 2 → 0
+    return utcCalendar.date(byAdding: .day, value: -back, to: utcCalendar.startOfDay(for: d)) ?? d
+}
+
+/// anchor + whole weeks from anchorDate to t; an unparsable date counts as no weeks.
+/// Both ends snap to their Monday, so an anchorDate typed mid-week still flips the number on the sprint boundary.
 func sprintNumber(anchor: Int, anchorDate: String, at t: Date) -> Int {
     guard let start = parseDay(anchorDate) else { return anchor }
-    let days = utcCalendar.dateComponents([.day], from: start, to: utcCalendar.startOfDay(for: t)).day ?? 0
-    return anchor + Int((Double(days) / 7).rounded(.down))
+    let days = utcCalendar.dateComponents([.day], from: weekStart(start), to: weekStart(t)).day ?? 0
+    return anchor + days / 7
 }

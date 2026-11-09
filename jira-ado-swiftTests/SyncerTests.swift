@@ -402,6 +402,12 @@ func sprintNumbers(day: String, want: Int) {
     #expect(sprintNumber(anchor: 63, anchorDate: "2026-06-01", at: parseDay(day)!.addingTimeInterval(15 * 3600)) == want)
 }
 
+/// A Wednesday anchor must still change number on Monday, not mid-week.
+@Test(arguments: [("2026-10-14", 82), ("2026-10-18", 82), ("2026-10-19", 83), ("2026-10-21", 83)])
+func sprintNumbersMidWeekAnchor(day: String, want: Int) {
+    #expect(sprintNumber(anchor: 82, anchorDate: "2026-10-14", at: parseDay(day)!.addingTimeInterval(15 * 3600)) == want)
+}
+
 @Test func adf() {
     let doc = parseJSON(Data(#"""
         {"type":"doc","content":[{"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"T"}]},
