@@ -432,3 +432,23 @@ func sprintNumbersMidWeekAnchor(day: String, want: Int) {
     await FakeEngine(delay: 0, now: { t0 }).seed(s)
     #expect(s.jobs.count == 3 && s.runs.count == 6 && s.job(3)?.status == .paused)
 }
+
+@Test func doneNeedsCompletedWork() async {
+    var s = Setup()
+    s.j.issues[1].raw["aggregatetimeoriginalestimate"] = nil  // no estimate and no worklog
+    let first = await s.sync()
+    let taskID = first.tickets[1].adoID
+    s.j.issues[1].raw["status"] = ["name": "Done"]
+    s.j.issues[1].raw["updated"] = "2026-10-14T12:00:00.000+0700"
+
+    var run = await s.sync()
+    #expect(s.a.items[taskID]!.fields[Field.state] as? String == "To Do", "no Completed Work: not closed")
+    #expect(run.tickets[1].needsWork == true && run.needsWorkKeys == ["SE-2"])
+
+    s.j.issues[1].raw["aggregatetimeoriginalestimate"] = 7200  // an estimate stands in for the log
+    s.j.issues[1].raw["updated"] = "2026-10-14T13:00:00.000+0700"
+    run = await s.sync()
+    #expect(s.a.items[taskID]!.fields[Field.state] as? String == "Done")
+    #expect(s.a.items[taskID]!.fields[Field.completedWork] as? Double == 2)
+    #expect(run.needsWorkKeys.isEmpty)
+}

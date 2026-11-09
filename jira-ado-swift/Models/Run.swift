@@ -22,6 +22,7 @@ struct Ticket: Codable, Hashable {
     var adoID = 0
     var message = ""  // what happened, e.g. why it was skipped
     var error = ""  // only when outcome is failed
+    var needsWork: Bool?  // Done was held back: ADO has no Completed Work to close it with
     var calls: [APICall] = []
 }
 
@@ -38,6 +39,9 @@ struct Run: Identifiable, Codable, Hashable {
     var error = ""  // the run itself failed (auth, Jira search…)
     var kind = RunKind.sync
     var tickets: [Ticket] = []
+
+    /// Tickets whose Done was held back; the user has to log the work before they close.
+    var needsWorkKeys: [String] { tickets.filter { $0.needsWork == true && !$0.key.isEmpty }.map(\.key) }
 
     var failedKeys: [String] { tickets.filter { $0.outcome == .failed && !$0.key.isEmpty }.map(\.key) }
 

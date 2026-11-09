@@ -13,6 +13,8 @@ private struct UpdateResult {
     var done = false  // ADO has it Done: left alone (commented)
     var wrote = false  // something was sent: fields, the Removed reset or a conflict comment
     var rels: [Relation] = []  // the item's links before this update
+    var note = ""  // what the Done gate did
+    var needsWork = false  // Done held back: no Completed Work to close it with
 }
 
 extension SyncRun {
@@ -77,13 +79,21 @@ extension SyncRun {
             wrote = res.wrote
             t.outcome = .updated
             t.message = dry ? "Would update ADO \(f.wiType) #\(existing)" : "Updated ADO \(f.wiType) #\(existing)"
+            if !res.note.isEmpty { t.message += " · " + res.note }
+            if res.needsWork { t.needsWork = true }
         } else {
+            let gate = gateDone(&f, [:])
+            if let gate {
+                t.message = gate.note
+                t.needsWork = gate.needsWork ? true : nil
+            }
             let id: Int
             do { id = try await create(f) } catch { return fail(error) }
             ids[f.key] = id
             t.outcome = .created
             t.adoID = dry ? 0 : id
-            t.message = dry ? "Would create a new ADO \(f.wiType)" : "Created ADO \(f.wiType) #\(id)"
+            let made = dry ? "Would create a new ADO \(f.wiType)" : "Created ADO \(f.wiType) #\(id)"
+            t.message = t.message.isEmpty ? made : made + " · " + t.message
         }
 
         // Attachment and comment failures don't fail the ticket, as in the source; they show up as warnings.
@@ -147,6 +157,20 @@ extension SyncRun {
             .map { PatchOp(op: "add", path: "/fields/" + $0.0, value: $0.1) }
     }
 
+    /// Closing a Task in ADO with no Completed Work loses the work log, so Done is only written with one:
+    /// the Original Estimate stands in, and with neither the state is held back for the user to fill in.
+    func gateDone(_ f: inout IssueFields, _ cur: JSONObject) -> (note: String, needsWork: Bool)? {
+        guard f.state == "Done", isTask(f.wiType), job.writes(Field.completedWork) else { return nil }
+        guard f.completed == 0, isEmptyValue(cur[Field.completedWork]) else { return nil }
+        let estimate = f.originalEstimate > 0 ? f.originalEstimate : number(cur[Field.originalEstimate]) ?? 0
+        guard estimate > 0 else {
+            f.state = ""  // dropped by ops(): the item keeps the state it has
+            return ("not closed: no Completed Work and no Original Estimate - log the work in Jira", true)
+        }
+        f.completed = estimate
+        return ("Completed Work filled from the Original Estimate (\(fmtAny(estimate))h)", false)
+    }
+
     /// Creates the work item in its first state, then moves it: ADO refuses to create one directly in a later state.
     func create(_ f: IssueFields) async throws -> Int {
         var initial = f
@@ -154,7 +178,7 @@ extension SyncRun {
         var ops = ops(initial)
         if f.parentID != 0 { ops.append(ado.parentRelation(f.parentID)) }
         let id = try await ado.create(type: f.wiType, ops: ops)
-        if f.state != initial.state && job.writes(Field.state) { try await ado.update(id, ops: self.ops(f)) }
+        if !f.state.isEmpty && f.state != initial.state && job.writes(Field.state) { try await ado.update(id, ops: self.ops(f)) }
         return id
     }
 
@@ -201,6 +225,11 @@ extension SyncRun {
         if keep(Field.targetDate, f.target) { f.target = "" }
         if keep(Field.originalEstimate, hours(d.timeOriginalEstimate)) { f.originalEstimate = 0 }
         if keep(Field.completedWork, hours(d.timeSpent)) { f.completed = 0 }
+
+        if let gate = gateDone(&f, cur) {
+            res.note = gate.note
+            res.needsWork = gate.needsWork
+        }
 
         var ops = changedOps(ops(f), cur)
         if f.parentID != 0 && !hasParent(w.relations, f.parentID) { ops.append(ado.parentRelation(f.parentID)) }

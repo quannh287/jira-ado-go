@@ -480,7 +480,9 @@ final class AppModel {
     /// Tells the user a run finished, unless the mode says otherwise; a click opens its report.
     private func notifyRun(_ job: Job, _ r: Run) {
         let failed = r.status != .success
-        guard notifyMode == .all || (notifyMode == .failures && failed) else { return }
+        let needsWork = r.needsWorkKeys
+        // "Failures only" also speaks up for a held-back Done: the user has to log the work for it to close.
+        guard notifyMode == .all || (notifyMode == .failures && (failed || !needsWork.isEmpty)) else { return }
         let what = r.kind == .dryRun ? "Dry run" : r.kind == .retry ? "Retry" : "Sync"
         var subtitle = what + " finished", body = fmtRunCounts(r)
         if !r.error.isEmpty {
@@ -489,6 +491,10 @@ final class AppModel {
             subtitle = what + " finished with failures"
             let keys = r.failedKeys
             body += "\nFailed: " + keys.prefix(3).joined(separator: ", ") + (keys.count > 3 ? " +\(keys.count - 3)" : "")
+        }
+        if !needsWork.isEmpty {
+            body += "\nNot closed, needs Completed Work: " + needsWork.prefix(3).joined(separator: ", ")
+                + (needsWork.count > 3 ? " +\(needsWork.count - 3)" : "")
         }
         notifier.notify(id: notificationID(job.id, r.id), title: job.name, subtitle: subtitle, body: body)
     }
