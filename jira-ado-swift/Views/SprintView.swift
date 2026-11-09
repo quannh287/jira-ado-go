@@ -74,6 +74,7 @@ struct SprintView: View {
             } }
             .chartYAxisLabel("hours")
             .frame(height: 200)
+            .padding(.trailing, 16)  // Friday sits on the plot edge; without this its label is clipped
             if state.days.count < 2 {
                 Text("The actual line fills in from tomorrow — one snapshot is taken per day.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -85,17 +86,18 @@ struct SprintView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("In \(board.sprint.name)").font(.headline)
             Table(rows, selection: Binding(get: { state.selection }, set: { model.sprint.selection = $0 })) {
-                TableColumn("ID") { Text("#\($0.task.id)").monospacedDigit() }.width(60)
+                TableColumn("ID") { Text(verbatim: "\($0.task.id)").monospacedDigit().textSelection(.enabled) }.width(60)
                 TableColumn("Title") { r in
                     Text(r.child ? "↳ \(r.task.title)" : r.task.title).strikethrough(r.task.done)
                 }
                 TableColumn("State") { Text($0.task.state).foregroundStyle(.secondary) }.width(90)
                 TableColumn("Est") { Text($0.task.carriesHours ? hoursText($0.task.estimate) : "—").monospacedDigit() }.width(50)
                 TableColumn("Day") { r in
-                    Text(r.task.priority > 0 ? "P\(r.task.priority) · \(r.task.due)" : "—").foregroundStyle(.secondary).monospacedDigit()
+                    Text(verbatim: day(r.task)).foregroundStyle(.secondary).monospacedDigit()
                 }.width(130)
                 TableColumn("Note") { r in
-                    if let v = r.verdict { Pill(v.rawValue, color(v)) }
+                    // "not done" on every open task says nothing on a Monday; only the exceptions earn a pill.
+                    if let v = r.verdict, v != .open { Pill(v.rawValue, color(v)) }
                 }.width(110)
             }
             .frame(height: 320)
@@ -115,7 +117,7 @@ struct SprintView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Outside the sprint").font(.headline)
                 Table(board.outside, selection: Binding(get: { state.outsideSelection }, set: { model.sprint.outsideSelection = $0 })) {
-                    TableColumn("ID") { Text("#\($0.id)").monospacedDigit() }.width(60)
+                    TableColumn("ID") { Text(verbatim: "\($0.id)").monospacedDigit().textSelection(.enabled) }.width(60)
                     TableColumn("Title") { Text($0.title) }
                     TableColumn("Type") { Text($0.type).foregroundStyle(.secondary) }.width(140)
                     TableColumn("Where") { Text(Iteration(path: $0.iteration).name).foregroundStyle(.secondary) }.width(120)
@@ -216,6 +218,11 @@ struct SprintView: View {
         case .unplanned: .purple
         case .reestimated: .accentColor
         }
+    }
+
+    private func day(_ t: SprintTask) -> String {
+        guard t.priority > 0 else { return "—" }
+        return t.due.isEmpty ? "P\(t.priority)" : "P\(t.priority) · \(t.due)"
     }
 
     private func one(_ ids: Set<Int>) -> SprintTask? {
