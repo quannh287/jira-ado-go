@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.0](https://github.com/quannh287/jira-ado-go/compare/v0.7.1...v0.8.0) (2026-11-09)
+
+
+### Features
+
+* hold Done until the ADO task has Completed Work ([82f1c8c](https://github.com/quannh287/jira-ado-go/commit/82f1c8c8b93d062b126e8cb7568e15ac2d6db49f))
+* Item History page showing which ADO revisions the sync wrote ([e122df1](https://github.com/quannh287/jira-ado-go/commit/e122df19e14a156e726d4df0b1204eeff8ea0e3a))
+* option to count sprints Jira hasn't started yet ([7fc1b4f](https://github.com/quannh287/jira-ado-go/commit/7fc1b4fac0512ed5f9c5281eb8d07d1a8c426aff))
+
+
+### Bug Fixes
+
+* count sprints from the anchor week's Monday, not the anchor date ([5b4a1b8](https://github.com/quannh287/jira-ado-go/commit/5b4a1b8c9ac284da4ebb6d162b3c9be612d0a305))
+* don't move a work item to the backlog when Jira sends no sprint data ([177ca71](https://github.com/quannh287/jira-ado-go/commit/177ca71d0df8acb458d4a1c4119fac4c3e0ebf23))
+
 ## [0.7.1](https://github.com/quannh287/jira-ado-go/compare/v0.7.0...v0.7.1) (2026-10-19)
 
 
