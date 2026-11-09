@@ -3,13 +3,15 @@ import Observation
 import UserNotifications
 
 enum Page: String, CaseIterable, Identifiable {
-    case dashboard = "Dashboard", jobs = "Sync Jobs", logs = "Logs", mappings = "Mappings", settings = "Settings"
+    case dashboard = "Dashboard", jobs = "Sync Jobs", logs = "Logs", history = "Item History", mappings = "Mappings",
+        settings = "Settings"
     var id: Self { self }
     var icon: String {
         switch self {
         case .dashboard: "square.grid.2x2"
         case .jobs: "arrow.triangle.2.circlepath"
         case .logs: "list.bullet"
+        case .history: "clock.arrow.circlepath"
         case .mappings: "link"
         case .settings: "gearshape"
         }
@@ -32,6 +34,15 @@ struct AppIconOption: Identifiable {
     static let all = [AppIconOption(id: "merge", name: "Merge"), AppIconOption(id: "bridge", name: "Bridge"), AppIconOption(id: "lanes", name: "Lane change")]
     static let defaultID = "bridge"  // the packaged icon
     static func get(_ id: String?) -> AppIconOption { all.first { $0.id == id } ?? all[1] }
+}
+
+/// The Item History page: an ADO work item's revisions, with this app's writes marked.
+struct HistoryState {
+    var input = ""  // a work item ID or its ADO URL
+    var loading = false
+    var error = ""
+    var workItem = 0  // what rows belong to; 0 = nothing loaded
+    var rows: [Revision] = []
 }
 
 /// What Jira and ADO offer as mapping values, loaded once per launch.
@@ -81,6 +92,7 @@ final class AppModel {
     @ObservationIgnored private var timedOut: Set<Int> = []
     private(set) var running: Set<Int> = []
     var catalog = CatalogState()
+    var history = HistoryState()
     /// The newer release found by the last check; the sheet shows while updateSheet is set.
     var availableUpdate: AppUpdate?
     var updateSheet: AppUpdate?
@@ -519,6 +531,41 @@ final class AppModel {
         catalog.error = err ?? ""
         catalog.loading = false
     }
+
+    // MARK: Item history
+
+    /// Loads the work item's ADO revisions and marks the ones this app wrote.
+    func loadHistory() async {
+        guard let id = workItemID(history.input) else {
+            history.error = "Enter an ADO work item ID or its URL."
+            return
+        }
+        // The project decides the REST path: use the job that synced this item, else the only one there is.
+        let job = store.jobs.first { j in store.runs.contains { $0.jobID == j.id && $0.tickets.contains { $0.adoID == id } } }
+        guard let project = (job ?? store.jobs.first)?.adoProject, !project.isEmpty else {
+            history.error = "Create a sync job first; its ADO project says where to look."
+            return
+        }
+        history.loading = true
+        history.error = ""
+        do {
+            let revs = try await engine.revisions(connection(), project: project, workItem: id)
+            history.rows = attribute(revs, runs: store.runs, workItem: id)
+            history.workItem = id
+        } catch {
+            history.rows = []
+            history.workItem = 0
+            history.error = describe(error)
+        }
+        history.loading = false
+    }
+}
+
+/// A work item ID typed on its own or pasted as an ADO URL (…/_workitems/edit/32602).
+func workItemID(_ s: String) -> Int? {
+    let digits = s.split(whereSeparator: { !$0.isNumber }).last.map(String.init) ?? ""
+    guard let id = Int(digits), id > 0 else { return nil }
+    return id
 }
 
 /// Launch arguments the UI tests start the app with.

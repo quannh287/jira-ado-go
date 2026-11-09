@@ -16,6 +16,8 @@ final class ScriptedEngine: SyncEngine {
     var block = false
     var syncs: [(job: Job, opts: RunOptions)] = []
     var started = t0
+    var revs: [Revision] = []
+    var revisionError: String?
 
     func validatePAT(org: String, pat: String) async throws -> String {
         guard let validName else { throw Failure("ADO rejected the personal access token") }
@@ -25,6 +27,11 @@ final class ScriptedEngine: SyncEngine {
     func check(_ conn: Connection, _ job: Job) async throws -> [String] { [] }
     func catalog(_ conn: Connection, jiraProjects: [String], adoProjects: [String]) async -> (Catalog, String?) {
         (Catalog(jiraTypes: jiraProjects, adoTypes: adoProjects), nil)
+    }
+
+    func revisions(_ conn: Connection, project: String, workItem: Int) async throws -> [Revision] {
+        if let revisionError { throw Failure(revisionError) }
+        return revs
     }
 
     func sync(_ conn: Connection, _ job: Job, _ opts: RunOptions) async -> Run {

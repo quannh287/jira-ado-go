@@ -171,6 +171,11 @@ final class Syncer: SyncEngine {
         cat.adoTypes = union(adoTypes).sorted()
         return (cat, errs.isEmpty ? nil : errs.joined(separator: "\n"))
     }
+
+    func revisions(_ conn: Connection, project: String, workItem: Int) async throws -> [Revision] {
+        if let m = conn.missing { throw Failure("set the \(m) in Settings first") }
+        return try await ADOClient(org: conn.adoOrg, project: project, pat: conn.pat).updates(workItem)
+    }
 }
 
 /// How many issues one Jira search fetches in full; one search per issue was the source's N+1.

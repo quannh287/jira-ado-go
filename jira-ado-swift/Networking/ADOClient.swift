@@ -96,6 +96,46 @@ final class ADOClient {
         return WorkItem(fields: o["fields"] as? JSONObject ?? [:], relations: rels)
     }
 
+    /// The work item's revision history, newest first.
+    func updates(_ id: Int) async throws -> [Revision] {
+        let o = try await send("GET", "/wit/workitems/\(id)/updates?api-version=\(Self.apiVersion)") as? JSONObject ?? [:]
+        return (o["value"] as? [JSONObject] ?? []).map(Self.revision).sorted { $0.id > $1.id }
+    }
+
+    /// Fields ADO rewrites on its own; showing them would bury the edit that was actually made.
+    private static let derivedFields: Set<String> = [
+        "System.Rev", "System.AuthorizedDate", "System.RevisedDate", "System.Watermark", "System.ChangedDate",
+        "System.ChangedBy", "System.AuthorizedAs", "System.PersonId", "System.AreaId", "System.IterationId",
+        "System.CommentCount", "System.BoardColumn", "System.BoardColumnDone", "System.IsDeleted",
+    ]
+
+    /// An identity field is an object; everything else goes through the plain one-line form.
+    private static func identityOrText(_ v: Any?) -> String {
+        if let o = v as? JSONObject, let name = o["displayName"] as? String { return name }
+        return oneLine(v)
+    }
+
+    private static func revision(_ u: JSONObject) -> Revision {
+        let fields = u["fields"] as? JSONObject ?? [:]
+        let by = (u["revisedBy"] as? JSONObject)?["displayName"] as? String ?? ""
+        let changed = (fields["System.ChangedDate"] as? JSONObject)?["newValue"] as? String
+        var r = Revision(id: u["id"] as? Int ?? 0, rev: u["rev"] as? Int ?? 0,
+                         at: parseJiraTime(changed ?? u["revisedDate"] as? String ?? "") ?? .distantPast,
+                         by: by.split(separator: " <").first.map(String.init) ?? by)
+        for (name, v) in fields.sorted(by: { $0.key < $1.key }) {
+            guard !derivedFields.contains(name), !name.hasPrefix("WEF_"),
+                  !name.contains("AreaLevel"), !name.contains("IterationLevel"), let v = v as? JSONObject else { continue }
+            if name == "System.History" {
+                r.changes.append("comment")
+                continue
+            }
+            let short = name.split(separator: ".").last.map(String.init) ?? name
+            let old = identityOrText(v["oldValue"]), new = identityOrText(v["newValue"])
+            r.changes.append(old.isEmpty ? "\(short): \(new)" : "\(short): \(old) → \(new)")
+        }
+        return r
+    }
+
     func create(type: String, ops: [PatchOp]) async throws -> Int {
         let out = try await send("POST", "/wit/workitems/$\(pathEscape(type))?api-version=\(Self.apiVersion)", "application/json-patch+json", ops.map(\.json))
         return (out as? JSONObject)?["id"] as? Int ?? 0

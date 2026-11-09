@@ -223,6 +223,33 @@ struct NetworkTests {
         #expect(StubProtocol.requests.last?.url.contains("/workitemtypes/Product%20Backlog%20Item/states") == true)
     }
 
+    /// Shaped like a real /updates page: derived fields, an identity object, a comment and a 9999 revisedDate.
+    @Test func adoUpdatesKeepOnlyRealChanges() async throws {
+        StubProtocol.respond { _ in
+            (200, #"""
+            {"value":[
+             {"id":3,"rev":3,"revisedBy":{"displayName":"Quan Nguyen <q@x.io>"},"revisedDate":"2026-10-14T05:12:06.52Z","fields":{
+               "System.ChangedDate":{"newValue":"2026-10-14T05:12:02.16Z"},
+               "System.IterationId":{"oldValue":999,"newValue":1003},
+               "System.IterationLevel3":{"oldValue":"Sprint 82","newValue":"Sprint 86"},
+               "System.IterationPath":{"oldValue":"T\\Sprint 82","newValue":"T\\Sprint 86"},
+               "System.AssignedTo":{"newValue":{"displayName":"Quan Nguyen"}},
+               "WEF_A_Kanban.Column":{"oldValue":"Doing","newValue":"Done"},
+               "System.Rev":{"oldValue":2,"newValue":3}}},
+             {"id":9,"rev":9,"revisedBy":{"displayName":"Quan Nguyen"},"revisedDate":"9999-01-01T00:00:00Z","fields":{
+               "System.ChangedDate":{"newValue":"2026-11-09T01:27:17.57Z"},
+               "System.History":{"newValue":"<p>hi</p>"}}}]}
+            """#)
+        }
+        let revs = try await ADOClient(org: "o", project: "p", pat: "x").updates(32602)
+        #expect(StubProtocol.requests.last?.url.contains("/wit/workitems/32602/updates") == true)
+        #expect(revs.map(\.rev) == [9, 3], "newest first")
+        #expect(revs[1].by == "Quan Nguyen", "the email is dropped from the display name")
+        #expect(revs[1].at == parseJiraTime("2026-10-14T05:12:02.16Z"), "ChangedDate wins over a 9999 revisedDate")
+        #expect(revs[1].changes == ["AssignedTo: Quan Nguyen", #"IterationPath: T\Sprint 82 → T\Sprint 86"#])
+        #expect(revs[0].changes == ["comment"])
+    }
+
     @Test func adoCreateAttachAndComments() async throws {
         StubProtocol.respond { r in
             r.url.contains("/attachments") ? (200, #"{"url":"https://ado.test/att/1"}"#) : r.url.contains("/comments") ? (200, #"{"id":5}"#) : (200, #"{"id":77}"#)

@@ -34,6 +34,7 @@ struct RootView: View {
         case .dashboard: DashboardView()
         case .jobs: JobsView()
         case .logs: LogsView()
+        case .history: HistoryView()
         case .mappings: MappingsView()
         case .settings: SettingsView()
         }

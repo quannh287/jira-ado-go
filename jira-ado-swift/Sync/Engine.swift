@@ -12,6 +12,8 @@ protocol SyncEngine {
     func sync(_ conn: Connection, _ job: Job, _ opts: RunOptions) async -> Run
     /// The values the Mappings page offers, and an error naming what couldn't load.
     func catalog(_ conn: Connection, jiraProjects: [String], adoProjects: [String]) async -> (Catalog, String?)
+    /// An ADO work item's revision history, newest first; the source is filled in from the call log.
+    func revisions(_ conn: Connection, project: String, workItem: Int) async throws -> [Revision]
 }
 
 /// Simulates Jira→ADO calls with generated tickets.
@@ -39,6 +41,16 @@ final class FakeEngine: SyncEngine {
     }
 
     func check(_ conn: Connection, _ job: Job) async throws -> [String] { [] }
+
+    func revisions(_ conn: Connection, project: String, workItem: Int) async throws -> [Revision] {
+        try await wait(delay)
+        let t = now()
+        return [
+            Revision(id: 3, rev: 3, at: t.addingTimeInterval(-3600), by: "Demo User", changes: ["IterationPath: Sprint 85 → Sprint 86"]),
+            Revision(id: 2, rev: 2, at: t.addingTimeInterval(-7200), by: "Demo User", changes: ["comment"]),
+            Revision(id: 1, rev: 1, at: t.addingTimeInterval(-86400), by: "Demo User", changes: ["State: New", "Title: CAT-1 - Demo issue"]),
+        ]
+    }
 
     func catalog(_ conn: Connection, jiraProjects: [String], adoProjects: [String]) async -> (Catalog, String?) {
         let cat = Catalog(
