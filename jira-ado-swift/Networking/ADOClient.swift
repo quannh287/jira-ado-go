@@ -66,6 +66,38 @@ final class ADOClient {
         return ((out?["workItems"] as? [JSONObject])?.first?["id"] as? Int) ?? 0
     }
 
+    /// Every work item id the query returns, in its order.
+    func wiql(_ query: String) async throws -> [Int] {
+        let out = try await send("POST", "/wit/wiql?api-version=\(Self.apiVersion)", "application/json", ["query": query]) as? JSONObject
+        return (out?["workItems"] as? [JSONObject] ?? []).compactMap { $0["id"] as? Int }
+    }
+
+    /// The live fields of each id. WIQL's index lags writes both ways, so its ids are candidates only — filter on these.
+    func batch(_ ids: [Int], fields: [String]) async throws -> [JSONObject] {
+        var out: [JSONObject] = []
+        for chunk in stride(from: 0, to: ids.count, by: 200).map({ Array(ids[$0..<min($0 + 200, ids.count)]) }) {
+            let body: JSONObject = ["ids": chunk, "fields": fields, "errorPolicy": "omit"]
+            let o = try await send("POST", "/wit/workitemsbatch?api-version=\(Self.apiVersion)", "application/json", body) as? JSONObject
+            out += (o?["value"] as? [JSONObject] ?? [])
+        }
+        return out
+    }
+
+    /// The iterations directly under a base path, with their dates. The team-scoped iterations API sits outside this
+    /// client's project base URL, so the classification tree answers it instead — and needs no team name.
+    func iterations(under base: String) async throws -> [Iteration] {
+        let parts = base.trimmingCharacters(in: CharacterSet(charactersIn: "\\")).components(separatedBy: "\\")
+        let rest = parts.dropFirst().map(pathEscape).joined(separator: "/")
+        let o = try await send("GET", "/wit/classificationnodes/iterations/\(rest)?$depth=1&api-version=\(Self.apiVersion)") as? JSONObject
+        return (o?["children"] as? [JSONObject] ?? []).compactMap { c in
+            let attrs = c["attributes"] as? JSONObject ?? [:]
+            guard let name = c["name"] as? String,
+                  let start = parseJiraTime(attrs["startDate"] as? String ?? ""),
+                  let finish = parseJiraTime(attrs["finishDate"] as? String ?? "") else { return nil }
+            return Iteration(path: base + "\\" + name, start: start, finish: finish)
+        }.sorted { $0.start < $1.start }
+    }
+
     /// Whether an area or iteration path exists. kind is "areas" or "iterations"; path starts with the project name.
     func nodeExists(kind: String, path: String) async throws -> Bool {
         let parts = path.trimmingCharacters(in: CharacterSet(charactersIn: "\\")).components(separatedBy: "\\")

@@ -16,6 +16,10 @@ enum Field {
     static let completedWork = "Microsoft.VSTS.Scheduling.CompletedWork"
     static let area = "System.AreaPath"
     static let iteration = "System.IterationPath"
+    // Read by the sprint board; the sync never writes these.
+    static let workItemType = "System.WorkItemType"
+    static let parent = "System.Parent"
+    static let dueDate = "Microsoft.VSTS.Scheduling.DueDate"
 
     /// Every pair the engine knows, in the source app's order; a job's mappings select among them.
     static let supported: [FieldPair] = [

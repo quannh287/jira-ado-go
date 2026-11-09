@@ -33,6 +33,7 @@ struct RootView: View {
         switch s {
         case .dashboard: DashboardView()
         case .jobs: JobsView()
+        case .sprint: SprintView()
         case .logs: LogsView()
         case .history: HistoryView()
         case .mappings: MappingsView()

@@ -19,6 +19,7 @@ final class Store {
     // State when there is no database.
     @ObservationIgnored private var memCursors: [Int: String] = [:]
     @ObservationIgnored private var memComments: [Int: [String: CommentMapping]] = [:]
+    @ObservationIgnored private var memSnapshots: [String: [String: [SprintTask]]] = [:]  // sprint → day → tasks
 
     // migrations[i] moves the schema from user_version i to i+1; append, never edit a shipped step.
     private static let migrations: [[String]] = [[
@@ -42,6 +43,14 @@ final class Store {
         """
         CREATE TABLE comment_mappings (ado_work_item_id INTEGER NOT NULL, jira_comment_id TEXT NOT NULL,
             ado_comment_id INTEGER NOT NULL, jira_updated TEXT NOT NULL, PRIMARY KEY (ado_work_item_id, jira_comment_id))
+        """,
+    ], [
+        // One row per task per day: the sprint burndown is read back from these, so re-running a day overwrites it.
+        """
+        CREATE TABLE sprint_snapshots (sprint TEXT NOT NULL, day TEXT NOT NULL, task_id INTEGER NOT NULL,
+            project TEXT NOT NULL, title TEXT NOT NULL, type TEXT NOT NULL, state TEXT NOT NULL,
+            estimate REAL NOT NULL, completed REAL NOT NULL, priority INTEGER NOT NULL, due TEXT NOT NULL,
+            parent_id INTEGER NOT NULL, iteration TEXT NOT NULL, PRIMARY KEY (sprint, day, task_id))
         """,
     ]]
 
@@ -206,6 +215,50 @@ final class Store {
     var sharedUsers: [UserPair] { (try? decode(settings[Setting.sharedUsers] ?? "")) ?? [] }
 
     func setSharedUsers(_ u: [UserPair]) { setSetting(Setting.sharedUsers, encode(u)) }
+
+    // MARK: Sprint planning
+
+    /// The saved sprint config; a missing or broken value means nothing is configured yet.
+    var sprintConfig: SprintConfig { (try? decode(settings[Setting.sprintConfig] ?? "")) ?? SprintConfig() }
+
+    func setSprintConfig(_ c: SprintConfig) { setSetting(Setting.sprintConfig, encode(c)) }
+
+    func saveSnapshot(sprint: String, day: String, tasks: [SprintTask]) {
+        guard db != nil else { memSnapshots[sprint, default: [:]][day] = tasks; return }
+        write(contentsOf: tasks.map {
+            ("""
+            INSERT INTO sprint_snapshots (sprint, day, task_id, project, title, type, state, estimate, completed,
+                priority, due, parent_id, iteration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(sprint, day, task_id) DO UPDATE SET project = excluded.project, title = excluded.title,
+                type = excluded.type, state = excluded.state, estimate = excluded.estimate,
+                completed = excluded.completed, priority = excluded.priority, due = excluded.due,
+                parent_id = excluded.parent_id, iteration = excluded.iteration
+            """,
+             [sprint, day, $0.id, $0.project, $0.title, $0.type, $0.state, $0.estimate, $0.completed,
+              $0.priority, $0.due, $0.parentID, $0.iteration])
+        })
+    }
+
+    /// Every snapshot of a sprint, oldest day first; the first one is the baseline the chart measures against.
+    func snapshots(sprint: String) -> [SprintDay] {
+        guard let db else { return days(memSnapshots[sprint] ?? [:]) }
+        let rows = (try? db.query("""
+            SELECT day, task_id, project, title, type, state, estimate, completed, priority, due, parent_id, iteration
+            FROM sprint_snapshots WHERE sprint = ? ORDER BY day
+            """, sprint)) ?? []
+        var byDay: [String: [SprintTask]] = [:]
+        for r in rows {
+            byDay[str(r[0]), default: []].append(SprintTask(
+                id: int(r[1]), project: str(r[2]), title: str(r[3]), type: str(r[4]), state: str(r[5]),
+                estimate: real(r[6]), completed: real(r[7]), priority: int(r[8]), due: str(r[9]),
+                parentID: int(r[10]), iteration: str(r[11])))
+        }
+        return days(byDay)
+    }
+
+    private func days(_ byDay: [String: [SprintTask]]) -> [SprintDay] {
+        byDay.keys.sorted().compactMap { k in parseDay(k).map { SprintDay(day: $0, tasks: byDay[k] ?? []) } }
+    }
 }
 
 extension Store: SyncState {
@@ -254,10 +307,13 @@ enum Setting {
     static let updateSkipped = "update_skipped"
     static let rules = "mapping_rules"
     static let sharedUsers = "shared_users"
+    static let sprintConfig = "sprint_config"
+    static let sprintLastSnapshot = "sprint_last_snapshot"  // yyyy-MM-dd
 }
 
 private func str(_ v: Any?) -> String { v as? String ?? "" }
 private func int(_ v: Any?) -> Int { Int(v as? Int64 ?? 0) }
+private func real(_ v: Any?) -> Double { v as? Double ?? Double(v as? Int64 ?? 0) }
 private func ms(_ d: Date) -> Int { Int(d.timeIntervalSince1970 * 1000) }
 private func date(_ v: Any?) -> Date { Date(timeIntervalSince1970: Double(int(v)) / 1000) }
 

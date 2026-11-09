@@ -3,13 +3,14 @@ import Observation
 import UserNotifications
 
 enum Page: String, CaseIterable, Identifiable {
-    case dashboard = "Dashboard", jobs = "Sync Jobs", logs = "Logs", history = "Item History", mappings = "Mappings",
-        settings = "Settings"
+    case dashboard = "Dashboard", jobs = "Sync Jobs", sprint = "Sprint", logs = "Logs", history = "Item History",
+        mappings = "Mappings", settings = "Settings"
     var id: Self { self }
     var icon: String {
         switch self {
         case .dashboard: "square.grid.2x2"
         case .jobs: "arrow.triangle.2.circlepath"
+        case .sprint: "chart.bar.xaxis"
         case .logs: "list.bullet"
         case .history: "clock.arrow.circlepath"
         case .mappings: "link"
@@ -93,6 +94,9 @@ final class AppModel {
     private(set) var running: Set<Int> = []
     var catalog = CatalogState()
     var history = HistoryState()
+    var sprint = SprintState()
+    /// Tests reach in here to point the tracker at a fake ADO.
+    @ObservationIgnored var makeTracker: ((SprintTracker) -> Void)?
     /// The newer release found by the last check; the sheet shows while updateSheet is set.
     var availableUpdate: AppUpdate?
     var updateSheet: AppUpdate?
@@ -153,6 +157,8 @@ final class AppModel {
             openError = "Couldn't open the database, nothing will be saved: " + describe(error)
             store = Store()
         }
+        // Migrated from the planning skill's YAML once; Settings owns it from then on.
+        if store.settings[Setting.sprintConfig] == nil { store.setSprintConfig(.seed) }
         let model = AppModel(store: store, engine: demo ? FakeEngine(delay: 1.5) : Syncer(state: store), secrets: .keychain, notifier: UserNotifier())
         model.latestRelease = { try await GitHubReleases.latest() }
         if let openError { model.show(openError) }
@@ -368,6 +374,7 @@ final class AppModel {
         updateBadge()
         if updateCheckDue { Task { await checkForUpdates(manual: false) } }
         guard !pat.isEmpty else { return }  // signed out: every run would fail on the missing PAT
+        if sprintSnapshotDue { Task { await loadSprint() } }
         let now = now()
         for j in store.jobs where j.type == .scheduler && j.status == .active && !running.contains(j.id) {
             let last = store.lastRun(j.id)?.started ?? j.created

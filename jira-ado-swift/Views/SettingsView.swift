@@ -72,6 +72,7 @@ struct SettingsView: View {
                 TextField("Jira key field", text: $keyField, prompt: Text(Defaults.jiraKeyField))
                     .help("ADO field holding \"KEY - id\"; the sync finds existing work items by it.")
             }
+            SprintSettings()
             Section("Jira") {
                 TextField("Site URL", text: $jiraURL, prompt: Text("https://your-site.atlassian.net"))
                     .accessibilityIdentifier("settings.jiraURL")
