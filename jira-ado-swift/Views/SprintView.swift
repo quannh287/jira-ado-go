@@ -12,23 +12,21 @@ struct SprintView: View {
     private var board: SprintBoard { state.board }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if !state.error.isEmpty { Label(state.error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
-                if state.loaded {
-                    capacity
-                    burndown
-                    tasks
-                    outside
-                } else if !state.loading {
-                    ContentUnavailableView("No sprint loaded", systemImage: "chart.bar.xaxis",
-                                           description: Text("Refresh to read the current sprint from ADO."))
-                        .padding(.top, 40)
-                }
+        VStack(alignment: .leading, spacing: 14) {
+            if !state.error.isEmpty { Label(state.error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+            if state.loaded {
+                header
+                week
+                tasks
+                outside
+            } else if !state.loading {
+                ContentUnavailableView("No sprint loaded", systemImage: "calendar",
+                                       description: Text("Refresh to read the current sprint from ADO."))
             }
-            .padding(20)
         }
-        .navigationTitle(state.loaded ? "\(board.sprint.name) · \(hoursText(state.committed)) / \(hoursText(model.sprintConfig.budget))" : "Sprint")
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .navigationTitle(state.loaded ? "\(board.sprint.name) · \(dateRange)" : "Sprint")
         .toolbar { toolbar }
         .overlay { if state.loading { ProgressView().controlSize(.large) } }
         .task { if !state.loaded { await model.loadSprint() } }
@@ -39,83 +37,128 @@ struct SprintView: View {
 
     // MARK: Pieces
 
-    private var capacity: some View {
-        HStack(spacing: 12) {
-            ForEach(model.sprintConfig.projects.filter { $0.effortPct > 0 }) { p in
-                let committed = state.committed(p.name), budget = p.budget(model.sprintConfig.workweekHours)
-                StatCard(label: p.name, value: "\(hoursText(committed)) / \(hoursText(budget))",
-                         color: committed > budget + 1 ? .orange : .primary)
+    /// Capacity, what needs attention and the burndown in one band, framed like the day columns so it sits in the
+    /// page instead of floating above it.
+    private var header: some View {
+        HStack(alignment: .top, spacing: 20) {
+            capacity
+            Divider()
+            flags
+            burndown.frame(width: 292)
+        }
+        .padding(12)
+        .frame(height: 148)
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color(.separatorColor)))
+    }
+
+    /// The week's loose ends, counted. Each line is work the planning skill would otherwise have to find again.
+    private var flags: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Needs attention").font(.caption).foregroundStyle(.secondary)
+            if issues.isEmpty {
+                Label("Nothing outstanding", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.green)
+            } else {
+                ForEach(issues.prefix(4), id: \.self) { i in
+                    Label(i, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                }
+                if issues.count > 4 { Text("+\(issues.count - 4) more").font(.caption2).foregroundStyle(.secondary) }
             }
-            StatCard(label: state.unplanned > 0 ? "Planned + unplanned" : "Total",
-                     value: state.unplanned > 0 ? "\(hoursText(state.planned)) + \(hoursText(state.unplanned))" : hoursText(state.committed))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// One compact gauge a project, read side by side: the number says how much, the bar says how close to full.
+    private var capacity: some View {
+        HStack(alignment: .top, spacing: 14) {
+            ForEach(model.sprintConfig.projects.filter { $0.effortPct > 0 }) { p in
+                CapacityBar(label: p.name, committed: state.committed(p.name),
+                            budget: p.budget(model.sprintConfig.workweekHours), tint: tint(p.name))
+            }
+            CapacityBar(label: "Total", committed: state.committed, budget: model.sprintConfig.budget,
+                        tint: .secondary, note: state.unplanned > 0 ? "+\(hoursText(state.unplanned)) unplanned" : "")
         }
     }
 
     private var burndown: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Burndown").font(.headline)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Burndown").font(.caption).foregroundStyle(.secondary)
             Chart {
-                ForEach(planLine, id: \.day) { p in
-                    LineMark(x: .value("Day", p.day), y: .value("Hours", p.value), series: .value("Series", "Plan"))
+                ForEach(planLine, id: \.name) { p in
+                    LineMark(x: .value("Day", p.name), y: .value("Hours", p.value), series: .value("Series", "Plan"))
                         .foregroundStyle(.secondary)
-                        .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
                 }
-                ForEach(state.days, id: \.day) { d in
-                    BarMark(x: .value("Day", d.day), y: .value("Hours", burned(d)))
-                        .foregroundStyle(Color.green.opacity(0.35))
-                    LineMark(x: .value("Day", d.day), y: .value("Hours", d.remaining), series: .value("Series", "Actual"))
+                ForEach(actualLine, id: \.name) { a in
+                    BarMark(x: .value("Day", a.name), y: .value("Hours", a.burned), width: .fixed(10))
+                        .foregroundStyle(Color.green.opacity(0.3))
+                    LineMark(x: .value("Day", a.name), y: .value("Hours", a.remaining), series: .value("Series", "Actual"))
                         .foregroundStyle(Color.accentColor)
                         .symbol(.circle)
                 }
             }
-            .chartXAxis { AxisMarks(values: board.sprint.days) { v in
-                AxisValueLabel { Text(weekdayNames[v.index % 5]) }
-                AxisGridLine()
-            } }
-            .chartYAxisLabel("hours")
-            .frame(height: 200)
-            .padding(.trailing, 16)  // Friday sits on the plot edge; without this its label is clipped
-            if state.days.count < 2 {
-                Text("The actual line fills in from tomorrow — one snapshot is taken per day.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            .chartXScale(domain: weekdayNames)
+            .chartXAxis { AxisMarks { AxisValueLabel().font(.caption2); AxisGridLine() } }
+            .chartYAxis { AxisMarks(position: .trailing) { AxisValueLabel().font(.caption2); AxisGridLine() } }
+            .frame(height: 76)
+            Text(state.days.count < 2 ? "Actual fills in from tomorrow — one snapshot a day."
+                                      : "Plan from Monday · bars are hours closed that day")
+                .font(.caption2).foregroundStyle(.secondary)
         }
     }
 
-    private var tasks: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("In \(board.sprint.name)").font(.headline)
-            Table(rows, selection: Binding(get: { state.selection }, set: { model.sprint.selection = $0 })) {
-                TableColumn("ID") { Text(verbatim: "\($0.task.id)").monospacedDigit().textSelection(.enabled) }.width(60)
-                TableColumn("Title") { r in
-                    Text(r.child ? "↳ \(r.task.title)" : r.task.title).strikethrough(r.task.done)
-                }
-                TableColumn("State") { Text($0.task.state).foregroundStyle(.secondary) }.width(90)
-                TableColumn("Est") { Text($0.task.carriesHours ? hoursText($0.task.estimate) : "—").monospacedDigit() }.width(50)
-                TableColumn("Day") { r in
-                    Text(verbatim: day(r.task)).foregroundStyle(.secondary).monospacedDigit()
-                }.width(130)
-                TableColumn("Note") { r in
-                    // "not done" on every open task says nothing on a Monday; only the exceptions earn a pill.
-                    if let v = r.verdict, v != .open { Pill(v.rawValue, color(v)) }
-                }.width(110)
+    /// The week itself, which is what planning actually looks at: five days, what sits on each, how full it is.
+    private var week: some View {
+        HStack(alignment: .top, spacing: 8) {
+            ForEach(Array(board.sprint.days.enumerated()), id: \.offset) { i, day in
+                DayColumn(name: weekdayNames[i], day: day, tasks: scheduled[dayString(day)] ?? [],
+                          cap: model.sprintConfig.workweekHours / 5, selection: selectionBinding, tint: tint)
             }
-            .frame(height: 320)
-            .contextMenu(forSelectionType: SprintTask.ID.self) { ids in
-                Button("Push to next sprint") { pushOut(ids) }
-                    .disabled(board.next == nil)
-                if let t = one(ids) {
-                    Button("Edit estimate and day…") { editing = t }
-                    if !t.carriesHours { Button("Add task under this…") { adding = t } }
-                }
+            if !unscheduled.isEmpty {
+                DayColumn(name: "Unscheduled", day: nil, tasks: unscheduled, cap: 0, selection: selectionBinding, tint: tint)
+                    .frame(width: 150)
+            }
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    private var tasks: some View {
+        Table(rows, selection: selectionBinding) {
+            TableColumn("ID") { Text(verbatim: "\($0.task.id)").monospacedDigit().textSelection(.enabled) }.width(62)
+            TableColumn("Title") { r in
+                Text(r.child ? "↳ \(r.task.title)" : r.task.title).strikethrough(r.task.done)
+            }
+            TableColumn("State") { Text($0.task.state).foregroundStyle(.secondary) }.width(90)
+            TableColumn("Est") { Text($0.task.carriesHours ? hoursText($0.task.estimate) : "—").monospacedDigit() }.width(50)
+            TableColumn("Day") { r in
+                Text(verbatim: day(r.task)).foregroundStyle(.secondary).monospacedDigit()
+            }.width(130)
+            TableColumn("Note") { r in
+                // "not done" on every open task says nothing on a Monday; only the exceptions earn a pill.
+                if let v = r.verdict, v != .open { Pill(v.rawValue, color(v)) }
+            }.width(110)
+        }
+        .frame(minHeight: 180, maxHeight: .infinity)
+        .contextMenu(forSelectionType: SprintTask.ID.self) { ids in
+            Button("Push to next sprint") { pushOut(ids) }
+                .disabled(board.next == nil)
+            if let t = one(ids) {
+                Button("Edit estimate and day…") { editing = t }
+                if !t.carriesHours { Button("Add task under this…") { adding = t } }
             }
         }
     }
 
     @ViewBuilder private var outside: some View {
         if !board.outside.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Outside the sprint").font(.headline)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Outside the sprint").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Pull selected into \(board.sprint.name)") { pullIn(state.outsideSelection) }
+                        .disabled(state.outsideSelection.isEmpty)
+                        .controlSize(.small)
+                }
                 Table(board.outside, selection: Binding(get: { state.outsideSelection }, set: { model.sprint.outsideSelection = $0 })) {
                     TableColumn("ID") { Text(verbatim: "\($0.id)").monospacedDigit().textSelection(.enabled) }.width(60)
                     TableColumn("Title") { Text($0.title) }
@@ -123,12 +166,10 @@ struct SprintView: View {
                     TableColumn("Where") { Text(Iteration(path: $0.iteration).name).foregroundStyle(.secondary) }.width(120)
                     TableColumn("Est") { Text($0.carriesHours ? hoursText($0.estimate) : "—").monospacedDigit() }.width(50)
                 }
-                .frame(height: 200)
+                .frame(height: 150)
                 .contextMenu(forSelectionType: SprintTask.ID.self) { ids in
                     Button("Pull into \(board.sprint.name)") { pullIn(ids) }
                 }
-                Button("Pull selected into \(board.sprint.name)") { pullIn(state.outsideSelection) }
-                    .disabled(state.outsideSelection.isEmpty)
             }
         }
     }
@@ -197,10 +238,59 @@ struct SprintView: View {
         return out
     }
 
-    private var planLine: [(day: Date, value: Double)] {
-        let total = state.days.first.map { committedHours($0.tasks) } ?? state.committed
+    private var selectionBinding: Binding<Set<Int>> {
+        Binding(get: { state.selection }, set: { model.sprint.selection = $0 })
+    }
+
+    /// "9–13 Nov".
+    private var dateRange: String {
         let days = board.sprint.days
-        return days.indices.map { (days[$0], total * Double(days.count - 1 - $0) / Double(max(days.count - 1, 1))) }
+        guard let first = days.first, let last = days.last else { return "" }
+        return "\(first.formatted(.dateTime.day()))–\(last.formatted(.dateTime.day().month(.abbreviated)))"
+    }
+
+    /// Tasks that carry hours, by the day they are due; anything without a day in this week stands apart.
+    private var scheduled: [String: [SprintTask]] {
+        Dictionary(grouping: board.tasks.filter { $0.carriesHours && weekDays.contains($0.due) }, by: \.due)
+    }
+
+    private var unscheduled: [SprintTask] {
+        board.tasks.filter { $0.carriesHours && !weekDays.contains($0.due) }
+    }
+
+    private var weekDays: Set<String> { Set(board.sprint.days.map(dayString)) }
+
+    /// One stable colour per project, so a chip in the week grid says whose it is without a label.
+    private func tint(_ project: String) -> Color {
+        let i = model.sprintConfig.projects.firstIndex { $0.name == project } ?? 0
+        return [Color.accentColor, .teal, .orange, .pink][i % 4]
+    }
+
+    private var issues: [String] {
+        var out: [String] = []
+        func line(_ n: Int, _ one: String, _ many: String) { if n > 0 { out.append("\(n) \(n == 1 ? one : many)") } }
+        line(board.tasks.filter { $0.carriesHours && !$0.done && $0.estimate == 0 }.count, "task with no estimate", "tasks with no estimate")
+        line(unscheduled.filter { !$0.done }.count, "task not on a day", "tasks not on a day")
+        line(board.tasks.filter { !$0.carriesHours && !$0.done && board.children($0.id).isEmpty }.count, "item with no task", "items with no task")
+        line(board.tasks.filter { !$0.carriesHours && $0.estimate > 0 }.count, "container carrying hours", "containers carrying hours")
+        let cap = model.sprintConfig.workweekHours / 5
+        line(board.sprint.days.filter { (scheduled[dayString($0)] ?? []).reduce(0) { $0 + $1.estimate } > cap + 1 }.count, "day over capacity", "days over capacity")
+        let stale = Set(board.iterations.filter { $0.finish < board.sprint.start }.map(\.path))
+        line(board.outside.filter { stale.contains($0.iteration) }.count, "item left in a finished sprint", "items left in a finished sprint")
+        return out
+    }
+
+    private var planLine: [(name: String, value: Double)] {
+        let total = state.days.first.map { committedHours($0.tasks) } ?? state.committed
+        return weekdayNames.indices.map { (weekdayNames[$0], total * Double(4 - $0) / 4) }
+    }
+
+    /// Snapshots placed on the weekday they were taken; a snapshot outside the sprint week has nowhere to go.
+    private var actualLine: [(name: String, remaining: Double, burned: Double)] {
+        state.days.compactMap { d in
+            guard let i = board.sprint.days.firstIndex(where: { dayString($0) == dayString(d.day) }) else { return nil }
+            return (weekdayNames[i], d.remaining, burned(d))
+        }
     }
 
     /// Hours closed on that day alone; the snapshot stores the running total.
@@ -244,6 +334,99 @@ struct SprintView: View {
     private func pushOut(_ ids: Set<Int>) {
         guard let t = model.tracker(), let next = board.next else { return }
         model.proposeSprint("Push to \(next.name)", t.movePlan(Array(ids), to: next.path, board))
+    }
+}
+
+/// How much of a budget is committed, with the budget itself as the tick: over it reads as over at a glance.
+private struct CapacityBar: View {
+    let label: String
+    let committed: Double
+    let budget: Double
+    var tint: Color = .accentColor
+    var note = ""
+
+    private var over: Bool { committed > budget + 1 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(verbatim: hoursText(committed)).font(.title3.bold()).monospacedDigit()
+                    .foregroundStyle(over ? .orange : .primary)
+                Text(verbatim: "/ \(hoursText(budget))").font(.caption).monospacedDigit().foregroundStyle(.secondary)
+            }
+            GeometryReader { geo in
+                let full = max(budget, committed, 1)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.quaternary)
+                    Capsule().fill(over ? Color.orange : tint)
+                        .frame(width: geo.size.width * committed / full)
+                    // The budget tick only means something while something sits past it.
+                    if over {
+                        Rectangle().fill(.primary).frame(width: 1)
+                            .offset(x: geo.size.width * budget / full)
+                    }
+                }
+            }
+            .frame(height: 6)
+            if !note.isEmpty { Text(note).font(.caption2).foregroundStyle(.secondary) }
+        }
+        .frame(width: 104)
+    }
+}
+
+/// One weekday of the grid: what is due on it and how full that leaves it.
+private struct DayColumn: View {
+    let name: String
+    let day: Date?
+    let tasks: [SprintTask]
+    let cap: Double
+    @Binding var selection: Set<Int>
+    let tint: (String) -> Color
+
+    private var load: Double { tasks.reduce(0) { $0 + $1.estimate } }
+    /// The user accepts an hour of daily overflow; past that the day is really over.
+    private var over: Bool { cap > 0 && load > cap + 1 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Text(name).font(.caption.bold())
+                Spacer()
+                Text(verbatim: cap > 0 ? "\(hoursText(load))/\(hoursText(cap))" : hoursText(load))
+                    .font(.caption2).monospacedDigit().foregroundStyle(over ? .orange : .secondary)
+            }
+            ScrollView {
+                VStack(spacing: 4) {
+                    ForEach(tasks) { t in chip(t) }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(over ? Color.orange.opacity(0.6) : Color(.separatorColor)))
+    }
+
+    private func chip(_ t: SprintTask) -> some View {
+        let picked = selection.contains(t.id)
+        return HStack(spacing: 6) {
+            Capsule().fill(tint(t.project)).frame(width: 3)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(t.title).font(.caption2).lineLimit(2).strikethrough(t.done)
+                Text(verbatim: "\(t.id) · \(hoursText(t.estimate))").font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .opacity(t.done ? 0.5 : 1)
+        .background(picked ? Color.accentColor.opacity(0.18) : Color(.textBackgroundColor).opacity(0.5),
+                    in: RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
+        .onTapGesture { selection = picked ? [] : [t.id] }
     }
 }
 
