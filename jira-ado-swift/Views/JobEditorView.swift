@@ -277,7 +277,7 @@ struct JobEditorView: View {
         j.adoProject = j.adoProject.trimmingCharacters(in: .whitespaces)
         model.store.addJob(j)
         model.show("Created \(j.name)")
-        model.open(.dashboard)
+        model.open(.jobs)
     }
 
     private func save() {

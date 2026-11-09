@@ -21,7 +21,7 @@ struct JiraADOApp: App {
                     .disabled(model.checkingUpdate)
             }
             CommandGroup(replacing: .newItem) {
-                Button("New Sync Job") { model.open(.dashboard, [.create]) }
+                Button("New Sync Job") { model.open(.jobs, [.create]) }
                     .keyboardShortcut("n")
                     .disabled(model.pat.isEmpty)
             }

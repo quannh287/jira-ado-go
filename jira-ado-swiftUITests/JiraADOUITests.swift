@@ -113,18 +113,17 @@ final class JiraADOUITests: XCTestCase {
         wait(button("Sign In"))
     }
 
-    // MARK: Dashboard and jobs
+    // MARK: Jobs
 
-    func testDashboardShowsStatsAndJobs() {
+    func testJobsPageListsEveryJob() {
         launch()
-        wait(text("Total Jobs"))
         for job in ["Mobile bugs → ADO", "Web platform stories", "Support escalations"] {
             wait(row(job))
         }
         XCTAssertTrue(text("PAUSED").exists)
     }
 
-    func testEmptyDashboardOffersToCreateAJob() {
+    func testEmptyJobsPageOffersToCreateAJob() {
         launch(empty: true)
         wait(text("No sync jobs yet"))
         click(field("empty.newJob"), until: field("job.name"))
@@ -264,8 +263,8 @@ final class JiraADOUITests: XCTestCase {
 
     func testSidebarPages() {
         launch()
-        for (page, marker) in [("Sync Jobs", "Mobile bugs → ADO"), ("Logs", "All jobs"), ("Mappings", "Work item types"),
-                               ("Settings", "Test Jira"), ("Dashboard", "Total Jobs")] {
+        for (page, marker) in [("Sync Jobs", "Mobile bugs → ADO"), ("Mappings", "Work item types"),
+                               ("Settings", "Test Jira"), ("Sprint", "Burndown")] {
             sidebar(page)
             wait(app.descendants(matching: .any).matching(NSPredicate(format: "value == %@ OR label == %@ OR title == %@", marker, marker, marker)).firstMatch)
         }
@@ -275,7 +274,9 @@ final class JiraADOUITests: XCTestCase {
 
     func testLogsFilterAndDelete() {
         launch()
-        sidebar("Logs")
+        sidebar("Sync Jobs")
+        click(row("Mobile bugs → ADO"), until: button("Sync Now"))
+        app.radioButtons["Logs"].click()
         let table = app.outlines.element(boundBy: 1)
         wait(row("#1"))
         let before = table.outlineRows.count

@@ -34,7 +34,7 @@ struct MenuBarMenu: View {
         Divider()
         Button("Open JirAdo") { show {} }.keyboardShortcut("o")
         if !model.pat.isEmpty {
-            Button("New Sync Job…") { show { model.open(.dashboard, [.create]) } }.keyboardShortcut("n")
+            Button("New Sync Job…") { show { model.open(.jobs, [.create]) } }.keyboardShortcut("n")
         }
         if let u = model.availableUpdate {
             Button("Update to \(u.version)…") { show { model.updateSheet = u } }

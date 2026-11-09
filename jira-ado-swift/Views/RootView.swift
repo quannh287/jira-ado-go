@@ -31,10 +31,8 @@ struct RootView: View {
 
     @ViewBuilder private func sectionView(_ s: Page) -> some View {
         switch s {
-        case .dashboard: DashboardView()
         case .jobs: JobsView()
         case .sprint: SprintView()
-        case .logs: LogsView()
         case .history: HistoryView()
         case .mappings: MappingsView()
         case .settings: SettingsView()
@@ -103,7 +101,7 @@ private struct Toolbar: ToolbarContent {
                 Label(scheme == .dark ? "Light Theme" : "Dark Theme", systemImage: scheme == .dark ? "sun.max" : "moon")
             }
             .help(scheme == .dark ? "Light Theme" : "Dark Theme")
-            Button { model.open(.dashboard, [.create]) } label: { Label("New Sync Job", systemImage: "plus") }
+            Button { model.open(.jobs, [.create]) } label: { Label("New Sync Job", systemImage: "plus") }
                 .help("New Sync Job  ⌘N")
             Button { model.paletteOpen = true } label: { Label("Search", systemImage: "magnifyingglass") }
                 .help("Search jobs and pages  ⌘K")
@@ -124,7 +122,7 @@ private struct Palette: View {
 
     private var entries: [Entry] {
         var all = Page.allCases.map { s in Entry(label: s.rawValue, hint: "Page") { model.open(s) } }
-        all.append(Entry(label: "New Sync Job", hint: "Action") { model.open(.dashboard, [.create]) })
+        all.append(Entry(label: "New Sync Job", hint: "Action") { model.open(.jobs, [.create]) })
         all += model.store.jobs.map { j in Entry(label: j.name, hint: "\(j.jiraKey) → \(j.adoProject)") { model.openJob(j.id) } }
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         return q.isEmpty ? all : all.filter { "\($0.label) \($0.hint)".lowercased().contains(q) }

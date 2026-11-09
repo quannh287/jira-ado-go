@@ -1,35 +1,18 @@
 import SwiftUI
 
-struct DashboardView: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        let store = model.store, now = Date()
-        let today = store.runs.filter { now.timeIntervalSince($0.started) < 86400 }
-        let ok = today.filter { $0.status == .success }.count
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) {
-                StatCard(label: "Total Jobs", value: "\(store.jobs.count)")
-                StatCard(label: "Active", value: "\(store.jobs.filter { $0.status == .active }.count)", color: .green)
-                StatCard(label: "Runs (24h)", value: "\(today.count)")
-                StatCard(label: "Success Rate (24h)", value: today.isEmpty ? "—" : "\(ok * 100 / today.count)%", color: .accentColor)
-            }
-            JobsTable()
-        }
-        .padding(20)
-        .navigationTitle("Dashboard")
-        .navigationSubtitle("Jira → ADO sync jobs at a glance")
-    }
-}
-
 struct JobsView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        JobsTable()
-            .padding(20)
-            .navigationTitle("Sync Jobs")
-            .navigationSubtitle("\(model.store.jobs.count) jobs")
+        // A one-row table is worth less than the job itself, and one job is the normal case here.
+        if model.store.jobs.count == 1 {
+            JobView(id: model.store.jobs[0].id)
+        } else {
+            JobsTable()
+                .padding(20)
+                .navigationTitle("Sync Jobs")
+                .navigationSubtitle("\(model.store.jobs.count) jobs")
+        }
     }
 }
 
@@ -75,12 +58,8 @@ struct JobsTable: View {
     }
 }
 
-#Preview("Dashboard") {
-    NavigationStack { DashboardView() }.previewModel().frame(width: 960, height: 600)
-}
-
-#Preview("Dashboard · Empty") {
-    NavigationStack { DashboardView() }.previewModel(PreviewData.model(empty: true)).frame(width: 960, height: 600)
+#Preview("Sync Jobs · Empty") {
+    NavigationStack { JobsView() }.previewModel(PreviewData.model(empty: true)).frame(width: 960, height: 500)
 }
 
 #Preview("Sync Jobs") {

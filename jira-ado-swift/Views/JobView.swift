@@ -7,7 +7,7 @@ struct JobView: View {
     @State private var confirmDelete = false
 
     enum Tab: String, CaseIterable { case configuration = "Configuration", mappings = "Field Mappings", filters = "Filters",
-                                       history = "Sync History", activity = "Activity Log", settings = "Settings" }
+                                       history = "Sync History", activity = "Activity Log", logs = "Logs", settings = "Settings" }
 
     var body: some View {
         if let j = model.store.job(id) {
@@ -57,6 +57,9 @@ struct JobView: View {
                         Text(a.text).textSelection(.enabled)
                     }
                 }
+            case .logs:
+                // Every job's runs, with the filters and export the old Logs page had.
+                LogsView()
             case .settings:
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Delete job").bold()

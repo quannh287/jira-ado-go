@@ -16,9 +16,6 @@ struct LogsView: View {
     var body: some View {
         let runs = runs, chosen = selection.intersection(model.store.runs.map(\.id))
         RunsTable(runs: runs, selection: $selection)
-            .padding(20)
-            .navigationTitle("Logs")
-            .navigationSubtitle("\(runs.count) of \(model.store.runs.count) runs")
             .toolbar {
                 ToolbarItemGroup {
                     Picker("Job", selection: $jobFilter) {
@@ -63,9 +60,9 @@ func exportRuns(_ runs: [Run], _ model: AppModel, name: String = "sync-runs.json
 }
 
 #Preview("Logs") {
-    NavigationStack { LogsView() }.previewModel().frame(width: 1100, height: 500)
+    NavigationStack { LogsView().padding(20) }.previewModel().frame(width: 1100, height: 500)
 }
 
 #Preview("Logs · Empty") {
-    NavigationStack { LogsView() }.previewModel(PreviewData.model(empty: true)).frame(width: 1100, height: 500)
+    NavigationStack { LogsView().padding(20) }.previewModel(PreviewData.model(empty: true)).frame(width: 1100, height: 500)
 }

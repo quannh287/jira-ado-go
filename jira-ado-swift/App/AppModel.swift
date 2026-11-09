@@ -3,15 +3,12 @@ import Observation
 import UserNotifications
 
 enum Page: String, CaseIterable, Identifiable {
-    case dashboard = "Dashboard", jobs = "Sync Jobs", sprint = "Sprint", logs = "Logs", history = "Item History",
-        mappings = "Mappings", settings = "Settings"
+    case jobs = "Sync Jobs", sprint = "Sprint", history = "Item History", mappings = "Mappings", settings = "Settings"
     var id: Self { self }
     var icon: String {
         switch self {
-        case .dashboard: "square.grid.2x2"
         case .jobs: "arrow.triangle.2.circlepath"
         case .sprint: "chart.bar.xaxis"
-        case .logs: "list.bullet"
         case .history: "clock.arrow.circlepath"
         case .mappings: "link"
         case .settings: "gearshape"
@@ -75,7 +72,7 @@ final class AppModel {
     @ObservationIgnored var badge: (Int) -> Void = { n in NSApp?.dockTile.badgeLabel = n > 0 ? "\(n)" : nil }
     @ObservationIgnored var now: () -> Date = Date.init
 
-    var section: Page = .dashboard
+    var section: Page = .jobs
     var path: [Route] = []
     var paletteOpen = false
     var notice: String?
@@ -241,7 +238,7 @@ final class AppModel {
         self.remember = remember && saved == nil
         store.setSetting(Setting.adoOrg, org)
         store.setSetting(Setting.adoUser, name)
-        open(.dashboard)
+        open(.jobs)
         tick()
     }
 
@@ -270,7 +267,7 @@ final class AppModel {
         if let err = await storePAT("", remember: false) { show("Couldn't remove the PAT from Keychain: " + err) }
         pat = ""
         remember = false
-        open(.dashboard)
+        open(.jobs)
     }
 
     func saveSettings(jiraURL: String, email: String, jql: String, keyField: String, token: String) async {
@@ -506,12 +503,12 @@ final class AppModel {
         notifier.notify(id: notificationID(job.id, r.id), title: job.name, subtitle: subtitle, body: body)
     }
 
-    /// Shows what a clicked notification is about; a run deleted since lands on its job, anything else on the dashboard.
+    /// Shows what a clicked notification is about; a run deleted since lands on its job, anything else on the job list.
     func openNotification(_ id: String) {
         openMainWindow?()
         NSApp?.activate()
         if id == Self.testNotificationID { return open(.settings) }
-        guard let (job, run) = parseNotificationID(id), store.job(job) != nil else { return open(.dashboard) }
+        guard let (job, run) = parseNotificationID(id), store.job(job) != nil else { return open(.jobs) }
         if store.run(run) != nil { openReport(job, run: run) } else { openJob(job) }
     }
 

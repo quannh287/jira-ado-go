@@ -181,7 +181,7 @@ struct Harness {
         h.model.openNotification(AppModel.testNotificationID)
         #expect(h.model.section == .settings && h.model.path.isEmpty)
         h.model.openNotification("run/999/1")
-        #expect(h.model.section == .dashboard)
+        #expect(h.model.section == .jobs)
     }
 
     @Test func tickStartsDueSchedulerJobsOnly() async {
@@ -236,7 +236,7 @@ struct Harness {
         await h.model.toggleRemember(false)
         #expect(try !h.model.remember && h.model.pat == "secret" && h.secrets.pat.get() == "")
         await h.model.logout()
-        #expect(h.model.pat.isEmpty && h.model.section == .dashboard)
+        #expect(h.model.pat.isEmpty && h.model.section == .jobs)
     }
 
     @Test func signInRejected() async {
@@ -262,8 +262,8 @@ struct Harness {
         let h = Harness()
         h.model.openJob(h.jobID)
         #expect(h.model.section == .jobs && h.model.path == [.job(h.jobID)])
-        h.model.open(.logs)
-        #expect(h.model.section == .logs && h.model.path.isEmpty)
+        h.model.open(.mappings)
+        #expect(h.model.section == .mappings && h.model.path.isEmpty)
     }
 
     @Test func catalogLoadsForTheJobsProjects() async {
