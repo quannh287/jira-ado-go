@@ -72,8 +72,10 @@ func issueURL(_ site: String, _ key: String) -> URL? {
 
 /// The ADO web link for a work item, or nil when it has none yet.
 func workItemURL(_ org: String, _ project: String, _ id: Int) -> URL? {
-    guard !org.isEmpty, !project.isEmpty, id > 0 else { return nil }
-    return URL(string: "https://dev.azure.com/\(pathEscape(org))/\(pathEscape(project))/_workitems/edit/\(id)")
+    guard !org.isEmpty, id > 0 else { return nil }
+    // ADO resolves a work item without its project, so a caller that doesn't know the project still gets a link.
+    let scope = project.isEmpty ? "" : "/" + pathEscape(project)
+    return URL(string: "https://dev.azure.com/\(pathEscape(org))\(scope)/_workitems/edit/\(id)")
 }
 
 /// A top-level ticket (or a parent that isn't in the run) with its sub-tasks.

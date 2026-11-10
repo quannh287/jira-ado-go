@@ -112,10 +112,10 @@ struct SprintView: View {
         HStack(alignment: .top, spacing: 8) {
             ForEach(Array(board.sprint.days.enumerated()), id: \.offset) { i, day in
                 DayColumn(name: weekdayNames[i], day: day, tasks: scheduled[dayString(day)] ?? [],
-                          cap: model.sprintConfig.workweekHours / 5, selection: selectionBinding, tint: tint)
+                          cap: model.sprintConfig.workweekHours / 5, selection: selectionBinding, tint: tint, open: adoURL)
             }
             if !unscheduled.isEmpty {
-                DayColumn(name: "Unscheduled", day: nil, tasks: unscheduled, cap: 0, selection: selectionBinding, tint: tint)
+                DayColumn(name: "Unscheduled", day: nil, tasks: unscheduled, cap: 0, selection: selectionBinding, tint: tint, open: adoURL)
                     .frame(width: 150)
             }
         }
@@ -124,7 +124,7 @@ struct SprintView: View {
 
     private var tasks: some View {
         Table(rows, selection: selectionBinding) {
-            TableColumn("ID") { Text(verbatim: "\($0.task.id)").monospacedDigit().textSelection(.enabled) }.width(62)
+            TableColumn("ID") { idLink($0.task) }.width(62)
             TableColumn("Title") { r in
                 Text(r.child ? "↳ \(r.task.title)" : r.task.title).strikethrough(r.task.done)
             }
@@ -143,6 +143,7 @@ struct SprintView: View {
             Button("Push to next sprint") { pushOut(ids) }
                 .disabled(board.next == nil)
             if let t = one(ids) {
+                if let url = adoURL(t) { Link("Open \(t.id) in ADO", destination: url) }
                 Button("Edit estimate and day…") { editing = t }
                 if !t.carriesHours { Button("Add task under this…") { adding = t } }
             }
@@ -160,7 +161,7 @@ struct SprintView: View {
                         .controlSize(.small)
                 }
                 Table(board.outside, selection: Binding(get: { state.outsideSelection }, set: { model.sprint.outsideSelection = $0 })) {
-                    TableColumn("ID") { Text(verbatim: "\($0.id)").monospacedDigit().textSelection(.enabled) }.width(60)
+                    TableColumn("ID") { idLink($0) }.width(60)
                     TableColumn("Title") { Text($0.title) }
                     TableColumn("Type") { Text($0.type).foregroundStyle(.secondary) }.width(140)
                     TableColumn("Where") { Text(Iteration(path: $0.iteration).name).foregroundStyle(.secondary) }.width(120)
@@ -169,6 +170,7 @@ struct SprintView: View {
                 .frame(height: 150)
                 .contextMenu(forSelectionType: SprintTask.ID.self) { ids in
                     Button("Pull into \(board.sprint.name)") { pullIn(ids) }
+                    if let t = one(ids), let url = adoURL(t) { Link("Open \(t.id) in ADO", destination: url) }
                 }
             }
         }
@@ -315,6 +317,21 @@ struct SprintView: View {
         return t.due.isEmpty ? "P\(t.priority)" : "P\(t.priority) · \(t.due)"
     }
 
+    /// The id doubles as the way into ADO; the web item is where every edit this page cannot make happens.
+    @ViewBuilder private func idLink(_ t: SprintTask) -> some View {
+        if let url = adoURL(t) {
+            Link(destination: url) { Text(verbatim: "\(t.id)").monospacedDigit() }
+                .help(url.absoluteString)
+                .accessibilityLabel("Open \(t.id) in ADO")  // the link's own label is empty to VoiceOver
+        } else {
+            Text(verbatim: "\(t.id)").monospacedDigit().textSelection(.enabled)
+        }
+    }
+
+    private func adoURL(_ t: SprintTask) -> URL? {
+        workItemURL(model.setting(Setting.adoOrg), model.sprintConfig.projects.first { $0.name == t.project }?.adoProject ?? "", t.id)
+    }
+
     private func one(_ ids: Set<Int>) -> SprintTask? {
         ids.count == 1 ? board.task(ids.first ?? 0) : nil
     }
@@ -383,6 +400,7 @@ private struct DayColumn: View {
     let cap: Double
     @Binding var selection: Set<Int>
     let tint: (String) -> Color
+    let open: (SprintTask) -> URL?
 
     private var load: Double { tasks.reduce(0) { $0 + $1.estimate } }
     /// The user accepts an hour of daily overflow; past that the day is really over.
@@ -427,6 +445,7 @@ private struct DayColumn: View {
                     in: RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
         .onTapGesture { selection = picked ? [] : [t.id] }
+        .contextMenu { if let url = open(t) { Link("Open \(t.id) in ADO", destination: url) } }
     }
 }
 

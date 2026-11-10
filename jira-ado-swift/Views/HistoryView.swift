@@ -41,6 +41,9 @@ struct HistoryView: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(model.history.loading || model.history.input.isEmpty)
             if model.history.loading { ProgressView().controlSize(.small) }
+            if let url = workItemURL(model.setting(Setting.adoOrg), "", model.history.workItem) {
+                Link("Open \(model.history.workItem) in ADO ↗", destination: url).help(url.absoluteString)
+            }
             Spacer()
         }
     }
